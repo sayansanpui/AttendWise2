@@ -1,0 +1,35 @@
+{
+    "flutter": {
+        "platforms": {
+            "android": {
+                "default": {
+                    "projectId": "attendwise2",
+                    "appId": "com.hackerspace.my_app",
+                    "fileOutput": "android/app/google-services.json"
+                }
+            },
+            "macos": {
+                "default": {
+                    "projectId": "attendwise2",
+                    "appId": "com.example.myApp"
+                }
+            },
+            "web": {
+                "default": {
+                    "projectId": "attendwise2",
+                    "appId": "my_app"
+                }
+            },
+            "dart": {
+                "lib/firebase_options.dart": {
+                    "projectId": "attendwise2",
+                    "configurations": {
+                        "android": "com.hackerspace.my_app",
+                        "macos": "com.example.myApp",
+                        "web": "my_app"
+                    }
+                }
+            }
+        }
+    }
+}

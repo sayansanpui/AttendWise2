@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "995671720434",
+    "project_id": "attendwise2",
+    "storage_bucket": "attendwise2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:995671720434:android:0ca51d55d70d56136cab6b",
+        "android_client_info": {
+          "package_name": "com.hackerspace.my_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB5M0DaXf9JvdvK96qTy0n0eQnV3KXNRmg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

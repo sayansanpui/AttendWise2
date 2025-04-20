@@ -11,10 +11,19 @@ void main() async {
   // Load environment variables
   await dotenv.load(fileName: '.env');
 
-  // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // Initialize Firebase with protection against duplicate initialization
+  try {
+    // Check if Firebase is already initialized
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } else {
+      Firebase.app(); // Get the already initialized app
+    }
+  } catch (e) {
+    debugPrint('Firebase initialization error: $e');
+  }
 
   runApp(
     // Add Riverpod provider to the entire app

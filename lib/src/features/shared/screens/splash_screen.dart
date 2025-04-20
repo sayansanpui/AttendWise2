@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../config/constants/asset_paths.dart';
 import '../../../config/constants/app_constants.dart';
+import '../../../config/routes/route_names.dart';
 
 /// Splash screen displayed when the app is launched
 class SplashScreen extends ConsumerStatefulWidget {
@@ -20,6 +22,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   void initState() {
     super.initState();
     _setupAnimations();
+    _navigateToNextScreen();
   }
 
   void _setupAnimations() {
@@ -36,6 +39,18 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     );
 
     _animationController.forward();
+  }
+
+  // Navigate to the appropriate screen after a delay
+  void _navigateToNextScreen() async {
+    // Wait for animations and initialization
+    await Future.delayed(const Duration(seconds: 3));
+
+    if (mounted) {
+      // TODO: Check authentication state here when implemented
+      // For now, always navigate to the login screen
+      context.go(RouteNames.login);
+    }
   }
 
   @override

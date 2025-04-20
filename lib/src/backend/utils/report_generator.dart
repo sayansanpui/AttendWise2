@@ -40,17 +40,17 @@ class ReportGenerator {
                 ),
                 pw.SizedBox(height: 20),
                 pw.Text(
-                  classroom.subjectName,
+                  classroom.name,
                   style: pw.TextStyle(fontSize: 18),
                 ),
                 pw.SizedBox(height: 10),
                 pw.Text(
-                  'Subject Code: ${classroom.subjectCode}',
+                  'Subject Code: ${classroom.code}',
                   style: pw.TextStyle(fontSize: 14),
                 ),
                 pw.SizedBox(height: 5),
                 pw.Text(
-                  'Section: ${classroom.section}',
+                  'Room: ${classroom.room}',
                   style: pw.TextStyle(fontSize: 14),
                 ),
                 pw.SizedBox(height: 5),
@@ -205,7 +205,7 @@ class ReportGenerator {
     // Save the PDF to a temporary file
     final output = await getTemporaryDirectory();
     final fileName =
-        'attendance_report_${classroom.classCode}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+        'attendance_report_${classroom.code}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
     final file = File('${output.path}/$fileName');
     await file.writeAsBytes(await pdf.save());
 
@@ -233,13 +233,13 @@ class ReportGenerator {
         .value = 'Attendance Report';
     summarySheet
         .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1))
-        .value = classroom.subjectName;
+        .value = classroom.name;
     summarySheet
         .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2))
-        .value = 'Subject Code: ${classroom.subjectCode}';
+        .value = 'Subject Code: ${classroom.code}';
     summarySheet
         .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 3))
-        .value = 'Section: ${classroom.section}';
+        .value = 'Room: ${classroom.room}';
     summarySheet
         .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 4))
         .value = 'Semester: ${classroom.semester}';
@@ -365,7 +365,7 @@ class ReportGenerator {
     // Save the Excel file
     final output = await getTemporaryDirectory();
     final fileName =
-        'attendance_report_${classroom.classCode}_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx';
+        'attendance_report_${classroom.code}_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx';
     final file = File('${output.path}/$fileName');
 
     await file.writeAsBytes(excel.encode()!);
@@ -461,7 +461,7 @@ class ReportGenerator {
                       };
 
                   return [
-                    classroom.subjectName,
+                    classroom.name,
                     stats['totalSessions'].toString(),
                     stats['present'].toString(),
                     stats['absent'].toString(),

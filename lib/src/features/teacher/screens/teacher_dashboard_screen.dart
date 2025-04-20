@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../../backend/repositories/classroom_repository.dart';
+import '../../../backend/models/classroom_model.dart';
 import '../../../config/routes/route_names.dart';
 import '../../../config/theme/dimensions.dart';
 import '../../../config/theme/color_schemes.dart';
@@ -18,88 +21,113 @@ class TeacherDashboardScreen extends ConsumerStatefulWidget {
 class _TeacherDashboardScreenState
     extends ConsumerState<TeacherDashboardScreen> {
   bool _isLoading = false;
-  final List<Map<String, dynamic>> _classes = [];
-  final Map<String, double> _attendanceData = {};
-  final Map<String, int> _attendanceCountsByStatus = {};
+  final _classroomRepository = ClassroomRepository();
+  String? _teacherId;
+
+  // Data variables
+  List<ClassroomModel> _classes = [];
+  Map<String, double> _attendanceData = {};
+  Map<String, int> _attendanceCountsByStatus = {};
+  List<Map<String, dynamic>> _recentSessions = [];
+  int _totalStudents = 0;
+  int _todaySessions = 0;
+  double _avgAttendance = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _teacherId = FirebaseAuth.instance.currentUser?.uid;
     _loadDashboardData();
   }
 
   Future<void> _loadDashboardData() async {
+    if (_teacherId == null) {
+      // Not logged in as a teacher
+      context.go(RouteNames.login);
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // TODO: Fetch real data from Firebase
-      await Future.delayed(const Duration(seconds: 1));
+      // Load classes
+      final classes =
+          await _classroomRepository.getClassroomsByTeacher(_teacherId!);
 
-      // Sample data for demonstration
-      setState(() {
-        // Class data
-        _classes.addAll([
-          {
-            'id': 'cs101',
-            'name': 'Introduction to Computer Science',
-            'code': 'CS101',
-            'students': 45,
-            'time': 'Mon, Wed, Fri 10:00 AM',
-            'attendance': 92.5,
-          },
-          {
-            'id': 'cs201',
-            'name': 'Data Structures & Algorithms',
-            'code': 'CS201',
-            'students': 38,
-            'time': 'Tue, Thu 1:00 PM',
-            'attendance': 87.3,
-          },
-          {
-            'id': 'cs301',
-            'name': 'Database Systems',
-            'code': 'CS301',
-            'students': 32,
-            'time': 'Mon, Wed 3:00 PM',
-            'attendance': 84.7,
-          },
-          {
-            'id': 'cs401',
-            'name': 'Software Engineering',
-            'code': 'CS401',
-            'students': 28,
-            'time': 'Fri 9:00 AM',
-            'attendance': 88.2,
-          },
-        ]);
+      // Calculate total students
+      int totalStudents = 0;
+      for (var classroom in classes) {
+        totalStudents += classroom.studentCount;
+      }
 
-        // Attendance data
-        _attendanceData.addAll({
-          'CS101': 92.5,
-          'CS201': 87.3,
-          'CS301': 84.7,
-          'CS401': 88.2,
-        });
+      // Calculate attendance data
+      Map<String, double> attendanceData = {};
+      double totalAttendanceRate = 0;
+      for (var classroom in classes) {
+        attendanceData[classroom.code] = classroom.attendanceRate;
+        totalAttendanceRate += classroom.attendanceRate;
+      }
 
-        // Attendance status counts
-        _attendanceCountsByStatus.addAll({
-          'Present': 124,
-          'Absent': 18,
-          'Late': 7,
-          'Excused': 5,
-        });
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to load dashboard data: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
+      // Get average attendance
+      double avgAttendance =
+          classes.isNotEmpty ? totalAttendanceRate / classes.length : 0;
+
+      // Get today's sessions count
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      // Get attendance stats
+      Map<String, int>? attendanceStats = {
+        'Present': 0,
+        'Absent': 0,
+        'Late': 0,
+        'Excused': 0,
+      };
+
+      // If there are classes, get attendance stats for the first class
+      if (classes.isNotEmpty) {
+        attendanceStats = (await _classroomRepository
+            .getAttendanceStats(classes[0].classroomId)).cast<String, int>();
+      }
+
+      // Get recent sessions
+      final recentSessions =
+          await _classroomRepository.getRecentSessions(_teacherId!);
+
+      // Calculate today's sessions
+      int todaySessions = 0;
+      for (var session in recentSessions) {
+        final sessionDate = (session['date'] as DateTime);
+        if (sessionDate.year == today.year &&
+            sessionDate.month == today.month &&
+            sessionDate.day == today.day) {
+          todaySessions++;
+        }
+      }
+
+      // Update state with fetched data
       if (mounted) {
+        setState(() {
+          _classes = classes;
+          _attendanceData = attendanceData;
+          _attendanceCountsByStatus = attendanceStats!;
+          _recentSessions = recentSessions;
+          _totalStudents = totalStudents;
+          _todaySessions = todaySessions;
+          _avgAttendance = avgAttendance;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load dashboard data: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
         setState(() {
           _isLoading = false;
         });
@@ -143,7 +171,9 @@ class _TeacherDashboardScreenState
                     SizedBox(height: AppDimensions.spacing24),
                     _buildAttendanceStats(),
                     SizedBox(height: AppDimensions.spacing24),
-                    _buildRecentClasses(),
+                    _buildActiveClassesCards(),
+                    SizedBox(height: AppDimensions.spacing24),
+                    _buildRecentAttendanceSessions(),
                     SizedBox(height: AppDimensions.spacing24),
                     _buildQuickActions(),
                   ],
@@ -152,7 +182,7 @@ class _TeacherDashboardScreenState
             ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // TODO: Navigate to create classroom screen
+          context.push(RouteNames.createClassroom);
         },
         icon: const Icon(Icons.add),
         label: const Text('New Class'),
@@ -162,6 +192,9 @@ class _TeacherDashboardScreenState
 
   Widget _buildTeacherDrawer(BuildContext context) {
     final theme = Theme.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName ?? 'Teacher';
+    final email = user?.email ?? '';
 
     return Drawer(
       child: ListView(
@@ -174,19 +207,21 @@ class _TeacherDashboardScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   radius: 30,
-                  backgroundImage: AssetImage('assets/account_circle.png'),
+                  backgroundImage: user?.photoURL != null
+                      ? NetworkImage(user!.photoURL!) as ImageProvider
+                      : const AssetImage('assets/account_circle.png'),
                 ),
                 SizedBox(height: AppDimensions.spacing8),
                 Text(
-                  'Professor Smith',
+                  displayName,
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: theme.colorScheme.onPrimary,
                   ),
                 ),
                 Text(
-                  'teacher@attendwise.com',
+                  email,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onPrimary.withOpacity(0.8),
                   ),
@@ -207,7 +242,7 @@ class _TeacherDashboardScreenState
             title: const Text('My Classes'),
             onTap: () {
               Navigator.pop(context);
-              context.go(RouteNames.teacherClassrooms);
+              context.push(RouteNames.teacherClassrooms);
             },
           ),
           ListTile(
@@ -215,7 +250,7 @@ class _TeacherDashboardScreenState
             title: const Text('Attendance Sessions'),
             onTap: () {
               Navigator.pop(context);
-              // Navigate to attendance sessions screen
+              context.push(RouteNames.teacherSessions);
             },
           ),
           ListTile(
@@ -223,7 +258,7 @@ class _TeacherDashboardScreenState
             title: const Text('Reports'),
             onTap: () {
               Navigator.pop(context);
-              // Navigate to reports screen
+              context.push(RouteNames.teacherReports);
             },
           ),
           const Divider(),
@@ -232,16 +267,29 @@ class _TeacherDashboardScreenState
             title: const Text('Settings'),
             onTap: () {
               Navigator.pop(context);
-              // Navigate to settings screen
+              context.push(RouteNames.settings);
             },
           ),
           ListTile(
             leading: const Icon(Icons.exit_to_app),
             title: const Text('Logout'),
-            onTap: () {
-              // TODO: Implement logout with Firebase Auth
-              Navigator.pop(context);
-              context.go(RouteNames.login);
+            onTap: () async {
+              try {
+                await FirebaseAuth.instance.signOut();
+                // Navigate to login screen
+                if (context.mounted) {
+                  context.go(RouteNames.login);
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to log out: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
             },
           ),
         ],
@@ -251,6 +299,8 @@ class _TeacherDashboardScreenState
 
   Widget _buildWelcomeCard() {
     final theme = Theme.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName ?? 'Teacher';
 
     return Card(
       elevation: AppDimensions.cardElevation,
@@ -275,7 +325,7 @@ class _TeacherDashboardScreenState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Welcome, Professor Smith',
+                        'Welcome, $displayName',
                         style: theme.textTheme.headlineSmall,
                       ),
                       SizedBox(height: AppDimensions.spacing4),
@@ -308,14 +358,17 @@ class _TeacherDashboardScreenState
           _buildSummaryCard('Active Classes', _classes.length.toString(),
               Icons.class_outlined, Colors.blue),
           SizedBox(width: AppDimensions.spacing12),
-          _buildSummaryCard(
-              'Total Students', '143', Icons.people_outline, Colors.green),
+          _buildSummaryCard('Total Students', _totalStudents.toString(),
+              Icons.people_outline, Colors.green),
+          SizedBox(width: AppDimensions.spacing12),
+          _buildSummaryCard('Today\'s Sessions', _todaySessions.toString(),
+              Icons.schedule, Colors.orange),
           SizedBox(width: AppDimensions.spacing12),
           _buildSummaryCard(
-              'Today\'s Sessions', '2', Icons.schedule, Colors.orange),
-          SizedBox(width: AppDimensions.spacing12),
-          _buildSummaryCard('Avg. Attendance', '88%',
-              Icons.insert_chart_outlined, Colors.purple),
+              'Avg. Attendance',
+              '${_avgAttendance.toStringAsFixed(1)}%',
+              Icons.insert_chart_outlined,
+              Colors.purple),
         ],
       ),
     );
@@ -453,6 +506,15 @@ class _TeacherDashboardScreenState
     final total = _attendanceCountsByStatus.values
         .fold<int>(0, (sum, value) => sum + value);
 
+    if (total == 0) {
+      return Center(
+        child: Text(
+          'No attendance data yet',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
+    }
+
     return PieChart(
       PieChartData(
         sectionsSpace: 2,
@@ -491,8 +553,44 @@ class _TeacherDashboardScreenState
     );
   }
 
-  Widget _buildRecentClasses() {
+  Widget _buildActiveClassesCards() {
     final theme = Theme.of(context);
+
+    if (_classes.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: EdgeInsets.all(AppDimensions.spacing16),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.class_outlined,
+                size: 48,
+                color: Colors.grey,
+              ),
+              SizedBox(height: AppDimensions.spacing8),
+              Text(
+                'No classes yet',
+                style: theme.textTheme.titleMedium,
+              ),
+              SizedBox(height: AppDimensions.spacing8),
+              Text(
+                'Create your first class by clicking the "New Class" button below',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium,
+              ),
+              SizedBox(height: AppDimensions.spacing16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  context.push(RouteNames.createClassroom);
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Create Class'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -501,7 +599,7 @@ class _TeacherDashboardScreenState
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'My Classes',
+              'Active Classes',
               style: theme.textTheme.titleLarge,
             ),
             TextButton(
@@ -511,59 +609,282 @@ class _TeacherDashboardScreenState
           ],
         ),
         SizedBox(height: AppDimensions.spacing16),
+        SizedBox(
+          height: 200,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _classes.length,
+            itemBuilder: (context, index) {
+              final classroom = _classes[index];
+              return Card(
+                margin: EdgeInsets.only(right: AppDimensions.spacing16),
+                child: Container(
+                  width: 280,
+                  padding: EdgeInsets.all(AppDimensions.spacing16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor:
+                                theme.colorScheme.primary.withOpacity(0.1),
+                            child: Text(
+                              classroom.code
+                                  .substring(0, min(2, classroom.code.length)),
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: AppDimensions.spacing12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  classroom.name,
+                                  style: theme.textTheme.titleMedium,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  classroom.code,
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: AppDimensions.spacing12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildClassInfoItem(Icons.people,
+                              '${classroom.studentCount} Students'),
+                          _buildClassInfoItem(Icons.room, classroom.room),
+                        ],
+                      ),
+                      SizedBox(height: AppDimensions.spacing8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildClassInfoItem(
+                              Icons.calendar_today, classroom.time),
+                          _buildClassInfoItem(Icons.school, classroom.level),
+                        ],
+                      ),
+                      SizedBox(height: AppDimensions.spacing12),
+                      LinearProgressIndicator(
+                        value: classroom.totalSessions > 0
+                            ? classroom.completedSessions /
+                                classroom.totalSessions
+                            : 0.0,
+                        backgroundColor: Colors.grey.withOpacity(0.2),
+                        color: theme.colorScheme.primary,
+                      ),
+                      SizedBox(height: AppDimensions.spacing4),
+                      Text(
+                        'Progress: ${classroom.completedSessions}/${classroom.totalSessions} Sessions',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const Spacer(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Chip(
+                            label: Text(
+                                '${classroom.attendanceRate.toStringAsFixed(1)}%'),
+                            backgroundColor:
+                                _getAttendanceColor(classroom.attendanceRate)
+                                    .withOpacity(0.1),
+                            labelStyle: TextStyle(
+                              color:
+                                  _getAttendanceColor(classroom.attendanceRate),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () {
+                              context.go(
+                                  '${RouteNames.teacherClassroomDetail.replaceAll(':classroomId', '')}${classroom.classroomId}');
+                            },
+                            child: const Text('Manage'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClassInfoItem(IconData icon, String text) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 16,
+          color: theme.colorScheme.primary,
+        ),
+        SizedBox(width: 4),
+        Text(
+          text,
+          style: theme.textTheme.bodySmall,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentAttendanceSessions() {
+    final theme = Theme.of(context);
+
+    if (_recentSessions.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: EdgeInsets.all(AppDimensions.spacing16),
+          child: Column(
+            children: [
+              Text(
+                'Recent Attendance Sessions',
+                style: theme.textTheme.titleLarge,
+              ),
+              SizedBox(height: AppDimensions.spacing16),
+              const Icon(
+                Icons.history,
+                size: 48,
+                color: Colors.grey,
+              ),
+              SizedBox(height: AppDimensions.spacing8),
+              Text(
+                'No recent attendance sessions',
+                style: theme.textTheme.titleMedium,
+              ),
+              SizedBox(height: AppDimensions.spacing8),
+              Text(
+                'Start taking attendance in your classes to see records here',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Recent Attendance Sessions',
+              style: theme.textTheme.titleLarge,
+            ),
+            TextButton(
+              onPressed: () => context.push(RouteNames.teacherSessions),
+              child: const Text('View All'),
+            ),
+          ],
+        ),
+        SizedBox(height: AppDimensions.spacing16),
         ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: _classes.length > 3 ? 3 : _classes.length,
+          itemCount: _recentSessions.length > 3 ? 3 : _recentSessions.length,
           itemBuilder: (context, index) {
-            final classData = _classes[index];
+            final session = _recentSessions[index];
+            final attendancePercentage = session['totalStudents'] > 0
+                ? (session['studentsPresent'] / session['totalStudents']) * 100
+                : 0.0;
+
             return Card(
               margin: EdgeInsets.only(bottom: AppDimensions.spacing12),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
-                  child: Text(
-                    classData['code'].substring(0, 2),
-                    style: TextStyle(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.bold,
+              child: Padding(
+                padding: EdgeInsets.all(AppDimensions.spacing16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor:
+                              theme.colorScheme.primary.withOpacity(0.1),
+                          child: Text(
+                            session['classCode'].substring(
+                                0, min(2, session['classCode'].length)),
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: AppDimensions.spacing12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                session['className'],
+                                style: theme.textTheme.titleMedium,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '${_formatDate(session['date'] as DateTime)} | ${session['duration']} mins',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Chip(
+                          label: Text(
+                              '${attendancePercentage.toStringAsFixed(1)}%'),
+                          backgroundColor:
+                              _getAttendanceColor(attendancePercentage)
+                                  .withOpacity(0.1),
+                          labelStyle: TextStyle(
+                            color: _getAttendanceColor(attendancePercentage),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                    SizedBox(height: AppDimensions.spacing12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Attendance: ${session['studentsPresent']}/${session['totalStudents']} students',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        OutlinedButton(
+                          onPressed: () {
+                            context.push(
+                                '${RouteNames.teacherSessionSummary.replaceAll(':sessionId', '')}${session['id']}');
+                          },
+                          child: const Text('View Details'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                title: Text(classData['name']),
-                subtitle: Text(
-                    '${classData['code']} - ${classData['students']} students'),
-                trailing: Chip(
-                  label: Text('${classData['attendance']}%'),
-                  backgroundColor: _getAttendanceColor(classData['attendance'])
-                      .withOpacity(0.1),
-                  labelStyle: TextStyle(
-                    color: _getAttendanceColor(classData['attendance']),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                onTap: () {
-                  context.go(
-                      '${RouteNames.teacherClassroomDetail.replaceAll(':classroomId', '')}${classData['id']}');
-                },
               ),
             );
           },
         ),
       ],
     );
-  }
-
-  Color _getAttendanceColor(double percentage) {
-    if (percentage >= 90) {
-      return AppColorScheme.presentColor;
-    } else if (percentage >= 80) {
-      return AppColorScheme.successColor;
-    } else if (percentage >= 70) {
-      return AppColorScheme.warningColor;
-    } else {
-      return AppColorScheme.absentColor;
-    }
   }
 
   Widget _buildQuickActions() {
@@ -589,7 +910,18 @@ class _TeacherDashboardScreenState
                   Icons.how_to_reg,
                   theme.colorScheme.primary,
                   () {
-                    // TODO: Navigate to start attendance session
+                    if (_classes.isNotEmpty) {
+                      context.push(
+                          '${RouteNames.teacherStartAttendance.replaceAll(':classroomId', '')}${_classes[0].classroomId}');
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('You need to create a class first'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                      context.push(RouteNames.createClassroom);
+                    }
                   },
                 ),
                 _buildQuickActionButton(
@@ -597,7 +929,7 @@ class _TeacherDashboardScreenState
                   Icons.add_circle_outline,
                   theme.colorScheme.secondary,
                   () {
-                    // TODO: Navigate to create class
+                    context.push(RouteNames.createClassroom);
                   },
                 ),
                 _buildQuickActionButton(
@@ -605,7 +937,26 @@ class _TeacherDashboardScreenState
                   Icons.assessment,
                   AppColorScheme.infoColor,
                   () {
-                    // TODO: Navigate to reports
+                    context.push(RouteNames.teacherReports);
+                  },
+                ),
+                _buildQuickActionButton(
+                  'Upload Material',
+                  Icons.upload_file,
+                  AppColorScheme.successColor,
+                  () {
+                    if (_classes.isNotEmpty) {
+                      context.push(
+                          '${RouteNames.teacherClassroomMaterials.replaceAll(':classroomId', '')}${_classes[0].classroomId}');
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('You need to create a class first'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                      context.push(RouteNames.createClassroom);
+                    }
                   },
                 ),
               ],
@@ -646,5 +997,34 @@ class _TeacherDashboardScreenState
         ),
       ),
     );
+  }
+
+  Color _getAttendanceColor(double percentage) {
+    if (percentage >= 90) {
+      return AppColorScheme.presentColor;
+    } else if (percentage >= 80) {
+      return AppColorScheme.successColor;
+    } else if (percentage >= 70) {
+      return AppColorScheme.warningColor;
+    } else {
+      return AppColorScheme.absentColor;
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      return 'Today, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    } else {
+      return '${date.day}/${date.month}/${date.year}';
+    }
+  }
+
+  int min(int a, int b) {
+    return a < b ? a : b;
   }
 }

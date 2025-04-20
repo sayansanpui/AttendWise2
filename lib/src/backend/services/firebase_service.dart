@@ -31,6 +31,15 @@ class FirebaseService {
   CollectionReference get submissionsCollection =>
       _firestore.collection('submissions');
 
+  // New collections for student import
+  CollectionReference get studentsCollection =>
+      _firestore.collection('students');
+  CollectionReference get departmentsCollection =>
+      _firestore.collection('departments');
+  CollectionReference get batchesCollection => _firestore.collection('batches');
+  CollectionReference get studentImportsCollection =>
+      _firestore.collection('studentImports');
+
   // Helper methods
   String generateId(String collectionPath) {
     return _firestore.collection(collectionPath).doc().id;

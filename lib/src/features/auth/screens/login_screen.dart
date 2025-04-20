@@ -41,22 +41,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      // TODO: Implement login logic with Firebase Auth
-      // This is a placeholder for the actual implementation
-      await Future.delayed(const Duration(seconds: 2));
+      // Sign in with email and password using Firebase Auth
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
 
-      // For demo purposes, we'll navigate to different dashboards based on email
-      final email = _emailController.text.trim().toLowerCase();
-      if (email.startsWith('admin')) {
-        context.go(RouteNames.adminDashboard);
-      } else if (email.startsWith('teacher')) {
-        context.go(RouteNames.teacherDashboard);
-      } else {
-        context.go(RouteNames.studentDashboard);
+      if (credential.user == null) {
+        throw Exception('Login failed: User is null');
       }
+
+      // Get the user's role from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(credential.user!.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        throw Exception('User data not found');
+      }
+
+      final userData = userDoc.data()!;
+      final userRole = userData['role'] as String?;
+      // Redirect based on role
+      if (userRole == 'admin') {
+        context.go(RouteNames.adminDashboard);
+      } else if (userRole == 'teacher') {
+        context.go(RouteNames.teacherDashboard);
+      } else if (userRole == 'student') {
+        context.go(RouteNames.studentDashboard);
+      } else {
+        // Default fallback or error case
+        throw Exception('Invalid user role: $userRole');
+      }
+    } on FirebaseAuthException catch (e) {
+      String errorMessage;
+      if (e.code == 'user-not-found') {
+        errorMessage = 'No user found with this email address.';
+      } else if (e.code == 'wrong-password') {
+        errorMessage = 'Incorrect password. Please try again.';
+      } else {
+        errorMessage = 'Login failed: ${e.message}';
+      }
+      setState(() {
+        _errorMessage = errorMessage;
+      });
     } catch (e) {
       setState(() {
-        _errorMessage = ErrorMessages.loginFailed;
+        _errorMessage = 'Login failed: ${e.toString()}';
       });
     } finally {
       if (mounted) {

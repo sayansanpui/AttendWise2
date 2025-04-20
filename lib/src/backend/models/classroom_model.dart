@@ -1,117 +1,124 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum ClassType { theory, lab }
+enum ClassroomStatus { active, archived, completed }
 
 class ClassroomModel {
   final String classroomId;
-  final String classCode;
-  final String subjectCode;
-  final String subjectName;
-  final String section;
-  final int year;
-  final int semester;
-  final String stream;
-  final ClassType classType;
-  final String createdBy;
-  final Timestamp createdAt;
-  final bool isActive;
+  final String name;
+  final String code;
+  final String teacherId;
+  final String room;
+  final String level;
+  final String year;
+  final String semester;
+  final String time;
+  final int totalSessions;
+  final int completedSessions;
+  final double attendanceRate;
+  final int studentCount;
+  final ClassroomStatus status;
+  final DateTime createdAt;
+  final DateTime? updatedAt;
 
   ClassroomModel({
     required this.classroomId,
-    required this.classCode,
-    required this.subjectCode,
-    required this.subjectName,
-    required this.section,
+    required this.name,
+    required this.code,
+    required this.teacherId,
+    required this.room,
+    required this.level,
     required this.year,
     required this.semester,
-    required this.stream,
-    required this.classType,
-    required this.createdBy,
+    required this.time,
+    this.totalSessions = 0,
+    this.completedSessions = 0,
+    this.attendanceRate = 0.0,
+    this.studentCount = 0,
+    this.status = ClassroomStatus.active,
     required this.createdAt,
-    required this.isActive,
+    this.updatedAt,
   });
-
-  factory ClassroomModel.fromJson(Map<String, dynamic> json) {
-    return ClassroomModel(
-      classroomId: json['classroomId'] as String,
-      classCode: json['classCode'] as String,
-      subjectCode: json['subjectCode'] as String,
-      subjectName: json['subjectName'] as String,
-      section: json['section'] as String,
-      year: json['year'] as int,
-      semester: json['semester'] as int,
-      stream: json['stream'] as String,
-      classType: _stringToClassType(json['classType'] as String),
-      createdBy: json['createdBy'] as String,
-      createdAt: json['createdAt'] as Timestamp,
-      isActive: json['isActive'] as bool,
-    );
-  }
 
   Map<String, dynamic> toJson() {
     return {
       'classroomId': classroomId,
-      'classCode': classCode,
-      'subjectCode': subjectCode,
-      'subjectName': subjectName,
-      'section': section,
+      'name': name,
+      'code': code,
+      'teacherId': teacherId,
+      'room': room,
+      'level': level,
       'year': year,
       'semester': semester,
-      'stream': stream,
-      'classType': _classTypeToString(classType),
-      'createdBy': createdBy,
-      'createdAt': createdAt,
-      'isActive': isActive,
+      'time': time,
+      'totalSessions': totalSessions,
+      'completedSessions': completedSessions,
+      'attendanceRate': attendanceRate,
+      'studentCount': studentCount,
+      'status': status.toString().split('.').last,
+      'createdAt': Timestamp.fromDate(createdAt),
+      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
     };
   }
 
-  static ClassType _stringToClassType(String typeStr) {
-    switch (typeStr) {
-      case 'theory':
-        return ClassType.theory;
-      case 'lab':
-        return ClassType.lab;
-      default:
-        throw ArgumentError('Invalid class type: $typeStr');
-    }
-  }
-
-  static String _classTypeToString(ClassType type) {
-    switch (type) {
-      case ClassType.theory:
-        return 'theory';
-      case ClassType.lab:
-        return 'lab';
-    }
+  factory ClassroomModel.fromJson(Map<String, dynamic> json) {
+    return ClassroomModel(
+      classroomId: json['classroomId'] as String,
+      name: json['name'] as String,
+      code: json['code'] as String,
+      teacherId: json['teacherId'] as String,
+      room: json['room'] as String,
+      level: json['level'] as String,
+      year: json['year'] as String,
+      semester: json['semester'] as String,
+      time: json['time'] as String,
+      totalSessions: json['totalSessions'] as int? ?? 0,
+      completedSessions: json['completedSessions'] as int? ?? 0,
+      attendanceRate: (json['attendanceRate'] as num?)?.toDouble() ?? 0.0,
+      studentCount: json['studentCount'] as int? ?? 0,
+      status: ClassroomStatus.values.firstWhere(
+        (e) => e.toString().split('.').last == json['status'],
+        orElse: () => ClassroomStatus.active,
+      ),
+      createdAt: (json['createdAt'] as Timestamp).toDate(),
+      updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
+    );
   }
 
   ClassroomModel copyWith({
     String? classroomId,
-    String? classCode,
-    String? subjectCode,
-    String? subjectName,
-    String? section,
-    int? year,
-    int? semester,
-    String? stream,
-    ClassType? classType,
-    String? createdBy,
-    Timestamp? createdAt,
-    bool? isActive,
+    String? name,
+    String? code,
+    String? teacherId,
+    String? room,
+    String? level,
+    String? year,
+    String? semester,
+    String? time,
+    int? totalSessions,
+    int? completedSessions,
+    double? attendanceRate,
+    int? studentCount,
+    ClassroomStatus? status,
+    DateTime? createdAt,
+    DateTime? updatedAt,
   }) {
     return ClassroomModel(
       classroomId: classroomId ?? this.classroomId,
-      classCode: classCode ?? this.classCode,
-      subjectCode: subjectCode ?? this.subjectCode,
-      subjectName: subjectName ?? this.subjectName,
-      section: section ?? this.section,
+      name: name ?? this.name,
+      code: code ?? this.code,
+      teacherId: teacherId ?? this.teacherId,
+      room: room ?? this.room,
+      level: level ?? this.level,
       year: year ?? this.year,
       semester: semester ?? this.semester,
-      stream: stream ?? this.stream,
-      classType: classType ?? this.classType,
-      createdBy: createdBy ?? this.createdBy,
+      time: time ?? this.time,
+      totalSessions: totalSessions ?? this.totalSessions,
+      completedSessions: completedSessions ?? this.completedSessions,
+      attendanceRate: attendanceRate ?? this.attendanceRate,
+      studentCount: studentCount ?? this.studentCount,
+      status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
-      isActive: isActive ?? this.isActive,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }

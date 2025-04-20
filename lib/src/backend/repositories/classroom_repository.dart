@@ -1,44 +1,55 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/classroom_model.dart';
 import '../models/enrollment_model.dart';
 import '../services/firebase_service.dart';
 
 class ClassroomRepository {
   final FirebaseService _firebaseService = FirebaseService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final CollectionReference _classroomsCollection =
+      FirebaseFirestore.instance.collection('classrooms');
 
   // Create a new classroom
   Future<String> createClassroom({
-    required String subjectCode,
-    required String subjectName,
-    required String section,
-    required int year,
-    required int semester,
-    required String stream,
-    required ClassType classType,
-    required String createdBy,
+    required String name,
+    required String code,
+    required String teacherId,
+    required String room,
+    required String level,
+    required String year,
+    required String semester,
+    required String time,
   }) async {
     try {
       // Generate a unique classroom ID
       final classroomId = _firebaseService.generateId('classrooms');
 
-      // Generate a unique 6-character class code
-      final classCode = _generateClassCode();
+      // Generate a unique class code (if not provided)
+      final classCode = code.isNotEmpty ? code : _generateClassCode();
 
-      // Create the classroom document
-      await _firebaseService.classroomsCollection.doc(classroomId).set({
-        'classroomId': classroomId,
-        'classCode': classCode,
-        'subjectCode': subjectCode,
-        'subjectName': subjectName,
-        'section': section,
-        'year': year,
-        'semester': semester,
-        'stream': stream,
-        'classType': _classTypeToString(classType),
-        'createdBy': createdBy,
-        'createdAt': _firebaseService.serverTimestamp,
-        'isActive': true,
-      });
+      // Create a new ClassroomModel instance
+      final classroom = ClassroomModel(
+        classroomId: classroomId,
+        name: name,
+        code: classCode,
+        teacherId: teacherId,
+        room: room,
+        level: level,
+        year: year,
+        semester: semester,
+        time: time,
+        totalSessions: 0,
+        completedSessions: 0,
+        attendanceRate: 0.0,
+        studentCount: 0,
+        status: ClassroomStatus.active,
+        createdAt: DateTime.now(),
+        updatedAt: null,
+      );
+
+      // Save to Firestore
+      await _classroomsCollection.doc(classroomId).set(classroom.toJson());
 
       return classroomId;
     } catch (e) {
@@ -49,8 +60,7 @@ class ClassroomRepository {
   // Get classroom by ID
   Future<ClassroomModel> getClassroomById(String classroomId) async {
     try {
-      final doc =
-          await _firebaseService.classroomsCollection.doc(classroomId).get();
+      final doc = await _classroomsCollection.doc(classroomId).get();
 
       if (!doc.exists) {
         throw Exception('Classroom not found');
@@ -65,8 +75,8 @@ class ClassroomRepository {
   // Get classrooms by teacher ID
   Future<List<ClassroomModel>> getClassroomsByTeacher(String teacherId) async {
     try {
-      final querySnapshot = await _firebaseService.classroomsCollection
-          .where('createdBy', isEqualTo: teacherId)
+      final querySnapshot = await _classroomsCollection
+          .where('teacherId', isEqualTo: teacherId)
           .orderBy('createdAt', descending: true)
           .get();
 
@@ -79,12 +89,14 @@ class ClassroomRepository {
     }
   }
 
-  // Get classrooms by department
-  Future<List<ClassroomModel>> getClassroomsByDepartment(
-      String department) async {
+  // Get active classrooms by teacher ID
+  Future<List<ClassroomModel>> getActiveClassroomsByTeacher(
+      String teacherId) async {
     try {
-      final querySnapshot = await _firebaseService.classroomsCollection
-          .where('stream', isEqualTo: department)
+      final querySnapshot = await _classroomsCollection
+          .where('teacherId', isEqualTo: teacherId)
+          .where('status',
+              isEqualTo: ClassroomStatus.active.toString().split('.').last)
           .orderBy('createdAt', descending: true)
           .get();
 
@@ -93,86 +105,90 @@ class ClassroomRepository {
               ClassroomModel.fromJson(doc.data() as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      throw Exception('Error fetching classrooms: ${e.toString()}');
+      throw Exception('Error fetching active classrooms: ${e.toString()}');
     }
   }
 
-  // Get classrooms by student ID (via enrollments)
-  Future<List<ClassroomModel>> getClassroomsByStudent(String studentId) async {
+  // Get student count for a classroom
+  Future<int> getStudentCount(String classroomId) async {
     try {
-      // First, get all enrollments for this student
-      final enrollmentSnapshot = await _firebaseService.enrollmentsCollection
-          .where('studentId', isEqualTo: studentId)
+      final querySnapshot = await _firebaseService.enrollmentsCollection
+          .where('classroomId', isEqualTo: classroomId)
           .where('isActive', isEqualTo: true)
           .get();
 
-      // Extract classroom IDs from enrollments
-      final classroomIds = enrollmentSnapshot.docs
-          .map((doc) =>
-              (doc.data() as Map<String, dynamic>)['classroomId'] as String)
-          .toList();
-
-      if (classroomIds.isEmpty) {
-        return [];
-      }
-
-      // Firestore doesn't support array contains with more than 10 items
-      // So we'll split into chunks if needed
-      List<ClassroomModel> allClassrooms = [];
-
-      for (int i = 0; i < classroomIds.length; i += 10) {
-        final endIndex =
-            (i + 10 < classroomIds.length) ? i + 10 : classroomIds.length;
-        final chunk = classroomIds.sublist(i, endIndex);
-
-        final querySnapshot = await _firebaseService.classroomsCollection
-            .where('classroomId', whereIn: chunk)
-            .where('isActive', isEqualTo: true)
-            .get();
-
-        final classrooms = querySnapshot.docs
-            .map((doc) =>
-                ClassroomModel.fromJson(doc.data() as Map<String, dynamic>))
-            .toList();
-
-        allClassrooms.addAll(classrooms);
-      }
-
-      return allClassrooms;
+      return querySnapshot.size;
     } catch (e) {
-      throw Exception('Error fetching student classrooms: ${e.toString()}');
+      throw Exception('Error fetching student count: ${e.toString()}');
     }
   }
 
   // Update classroom details
   Future<void> updateClassroom(
-      String classroomId, Map<String, dynamic> data) async {
+      String classroomId, ClassroomModel classroom) async {
     try {
-      await _firebaseService.classroomsCollection.doc(classroomId).update(data);
+      // Update the updatedAt timestamp
+      final updatedClassroom = classroom.copyWith(
+        updatedAt: DateTime.now(),
+      );
+
+      await _classroomsCollection
+          .doc(classroomId)
+          .update(updatedClassroom.toJson());
     } catch (e) {
       throw Exception('Error updating classroom: ${e.toString()}');
     }
   }
 
-  // Deactivate classroom
-  Future<void> deactivateClassroom(String classroomId) async {
+  // Update classroom status
+  Future<void> updateClassroomStatus(
+      String classroomId, ClassroomStatus status) async {
     try {
-      await _firebaseService.classroomsCollection.doc(classroomId).update({
-        'isActive': false,
+      await _classroomsCollection.doc(classroomId).update({
+        'status': status.toString().split('.').last,
+        'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      throw Exception('Error deactivating classroom: ${e.toString()}');
+      throw Exception('Error updating classroom status: ${e.toString()}');
     }
   }
 
-  // Join classroom with class code (for students)
-  Future<String> joinClassroomWithCode(
-      String classCode, String studentId) async {
+  // Update classroom attendance metrics
+  Future<void> updateAttendanceMetrics(String classroomId, int totalSessions,
+      int completedSessions, double attendanceRate) async {
+    try {
+      await _classroomsCollection.doc(classroomId).update({
+        'totalSessions': totalSessions,
+        'completedSessions': completedSessions,
+        'attendanceRate': attendanceRate,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception('Error updating attendance metrics: ${e.toString()}');
+    }
+  }
+
+  // Update student count
+  Future<void> updateStudentCount(String classroomId, int count) async {
+    try {
+      await _classroomsCollection.doc(classroomId).update({
+        'studentCount': count,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception('Error updating student count: ${e.toString()}');
+    }
+  }
+
+  // Join classroom with code (for students)
+  Future<ClassroomModel> joinClassroomWithCode(
+      String code, String studentId) async {
     try {
       // Find the classroom with this code
-      final querySnapshot = await _firebaseService.classroomsCollection
-          .where('classCode', isEqualTo: classCode)
-          .where('isActive', isEqualTo: true)
+      final querySnapshot = await _classroomsCollection
+          .where('code', isEqualTo: code)
+          .where('status',
+              isEqualTo: ClassroomStatus.active.toString().split('.').last)
           .limit(1)
           .get();
 
@@ -183,6 +199,7 @@ class ClassroomRepository {
       final classroomData =
           querySnapshot.docs.first.data() as Map<String, dynamic>;
       final classroomId = classroomData['classroomId'] as String;
+      final classroom = ClassroomModel.fromJson(classroomData);
 
       // Check if student is already enrolled
       final enrollmentCheck = await _firebaseService.enrollmentsCollection
@@ -203,7 +220,11 @@ class ClassroomRepository {
           await _firebaseService.enrollmentsCollection
               .doc(enrollmentCheck.docs.first.id)
               .update({'isActive': true});
-          return classroomId;
+
+          // Update student count
+          await updateStudentCount(classroomId, classroom.studentCount + 1);
+
+          return classroom;
         }
       }
 
@@ -213,11 +234,14 @@ class ClassroomRepository {
         'enrollmentId': enrollmentId,
         'studentId': studentId,
         'classroomId': classroomId,
-        'enrolledAt': _firebaseService.serverTimestamp,
+        'enrolledAt': FieldValue.serverTimestamp(),
         'isActive': true,
       });
 
-      return classroomId;
+      // Update student count
+      await updateStudentCount(classroomId, classroom.studentCount + 1);
+
+      return classroom;
     } catch (e) {
       throw Exception('Error joining classroom: ${e.toString()}');
     }
@@ -240,47 +264,159 @@ class ClassroomRepository {
     }
   }
 
-  // Remove student from classroom
-  Future<void> removeStudentFromClassroom(
-      String classroomId, String studentId) async {
-    try {
-      final querySnapshot = await _firebaseService.enrollmentsCollection
-          .where('classroomId', isEqualTo: classroomId)
-          .where('studentId', isEqualTo: studentId)
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isEmpty) {
-        throw Exception('Student is not enrolled in this classroom');
-      }
-
-      await _firebaseService.enrollmentsCollection
-          .doc(querySnapshot.docs.first.id)
-          .update({'isActive': false});
-    } catch (e) {
-      throw Exception('Error removing student: ${e.toString()}');
-    }
-  }
-
   // Generate a unique 6-character class code
   String _generateClassCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     var code = '';
+    final random = DateTime.now().millisecondsSinceEpoch;
 
     for (var i = 0; i < 6; i++) {
-      code += chars[(DateTime.now().millisecondsSinceEpoch % chars.length)];
+      code += chars[((random + i) % chars.length)];
     }
 
     return code;
   }
 
-  // Convert class type enum to string
-  String _classTypeToString(ClassType type) {
-    switch (type) {
-      case ClassType.theory:
-        return 'theory';
-      case ClassType.lab:
-        return 'lab';
+  // Get attendance statistics for a classroom
+  Future<Map<String, dynamic>> getAttendanceStats(String classroomId) async {
+    try {
+      final attendanceSnapshot = await _firestore
+          .collection('attendance_sessions')
+          .where('classroomId', isEqualTo: classroomId)
+          .get();
+
+      if (attendanceSnapshot.docs.isEmpty) {
+        return {
+          'Present': 0,
+          'Absent': 0,
+          'Late': 0,
+          'Excused': 0,
+        };
+      }
+
+      int presentCount = 0;
+      int absentCount = 0;
+      int lateCount = 0;
+      int excusedCount = 0;
+
+      for (var doc in attendanceSnapshot.docs) {
+        final attendanceData = doc.data() as Map<String, dynamic>;
+        final records = attendanceData['records'] as List<dynamic>? ?? [];
+
+        for (var record in records) {
+          final status = record['status'] as String? ?? '';
+          if (status == 'present') {
+            presentCount++;
+          } else if (status == 'absent') {
+            absentCount++;
+          } else if (status == 'late') {
+            lateCount++;
+          } else if (status == 'excused') {
+            excusedCount++;
+          }
+        }
+      }
+
+      return {
+        'Present': presentCount,
+        'Absent': absentCount,
+        'Late': lateCount,
+        'Excused': excusedCount,
+      };
+    } catch (e) {
+      throw Exception('Error fetching attendance stats: ${e.toString()}');
+    }
+  }
+
+  // Get classroom sessions
+  Future<List<Map<String, dynamic>>> getClassroomSessions(
+      String classroomId) async {
+    try {
+      final sessionSnapshot = await _firestore
+          .collection('attendance_sessions')
+          .where('classroomId', isEqualTo: classroomId)
+          .orderBy('date', descending: true)
+          .get();
+
+      final classroom = await getClassroomById(classroomId);
+
+      return sessionSnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final records = data['records'] as List<dynamic>? ?? [];
+        final studentsPresent =
+            records.where((r) => (r['status'] as String) == 'present').length;
+
+        return {
+          'id': doc.id,
+          'classId': classroomId,
+          'className': classroom.name,
+          'classCode': classroom.code,
+          'date': (data['date'] as Timestamp).toDate(),
+          'studentsPresent': studentsPresent,
+          'totalStudents': records.length,
+          'duration': data['duration'] as int? ?? 0,
+          'status': data['status'] as String? ?? 'Completed',
+        };
+      }).toList();
+    } catch (e) {
+      throw Exception('Error fetching classroom sessions: ${e.toString()}');
+    }
+  }
+
+  // Get recent attendance sessions
+  Future<List<Map<String, dynamic>>> getRecentSessions(String teacherId) async {
+    try {
+      // Get teacher's classrooms
+      final classrooms = await getClassroomsByTeacher(teacherId);
+      if (classrooms.isEmpty) return [];
+
+      final classroomIds = classrooms.map((c) => c.classroomId).toList();
+
+      // Firestore doesn't support array contains with more than 10 items
+      // So we'll split into chunks if needed
+      List<Map<String, dynamic>> allSessions = [];
+
+      for (int i = 0; i < classroomIds.length; i += 10) {
+        final endIndex =
+            (i + 10 < classroomIds.length) ? i + 10 : classroomIds.length;
+        final chunk = classroomIds.sublist(i, endIndex);
+
+        final sessionSnapshot = await _firestore
+            .collection('attendance_sessions')
+            .where('classroomId', whereIn: chunk)
+            .orderBy('date', descending: true)
+            .limit(10)
+            .get();
+
+        for (var doc in sessionSnapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final classroomId = data['classroomId'] as String;
+          final classroom =
+              classrooms.firstWhere((c) => c.classroomId == classroomId);
+          final records = data['records'] as List<dynamic>? ?? [];
+          final studentsPresent =
+              records.where((r) => (r['status'] as String) == 'present').length;
+
+          allSessions.add({
+            'id': doc.id,
+            'classId': classroomId,
+            'className': classroom.name,
+            'classCode': classroom.code,
+            'date': (data['date'] as Timestamp).toDate(),
+            'studentsPresent': studentsPresent,
+            'totalStudents': records.length,
+            'duration': data['duration'] as int? ?? 0,
+            'status': data['status'] as String? ?? 'Completed',
+          });
+        }
+      }
+
+      // Sort by date (most recent first) and limit to 5
+      allSessions.sort(
+          (a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+      return allSessions.take(5).toList();
+    } catch (e) {
+      throw Exception('Error fetching recent sessions: ${e.toString()}');
     }
   }
 }

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import '../models/attendance_session_model.dart';
 import '../models/attendance_record_model.dart';
 import '../services/firebase_service.dart';
@@ -36,6 +37,8 @@ class AttendanceRepository {
       throw Exception('Error creating attendance session: ${e.toString()}');
     }
   }
+
+  
 
   // End an attendance session
   Future<void> endAttendanceSession(String sessionId) async {
@@ -177,7 +180,10 @@ class AttendanceRepository {
         });
       }
 
+      // Commit batch
       await batch.commit();
+      debugPrint(
+          'Bulk attendance marked successfully: ${studentIds.length} records created');
     } catch (e) {
       throw Exception('Error marking bulk attendance: ${e.toString()}');
     }

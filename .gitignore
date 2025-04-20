@@ -48,3 +48,9 @@ app.*.map.json
 /android/-gradle/buildOutputCleanup/buildOutputCleanup. lock
 /android/-gradle/buildOutputCleanup/outputFiles.bin
 /android/-gradle/file-system.probewindows/flutter/ephemeral/
+
+# Environment files with secrets
+.env
+.env.development
+.env.production
+*.env

@@ -1,11 +1,11 @@
 #!/bin/sh
 # This is a generated file; do not edit or check into version control.
 export "FLUTTER_ROOT=/Users/sayansanpui/development/flutter"
-export "FLUTTER_APPLICATION_PATH=/Volumes/T7/Developer/Flutter/Hackerspace-New/attendwise"
+export "FLUTTER_APPLICATION_PATH=/Volumes/T7/Developer/AttendWise_ A Digital College Attendance Management System/AttendWise2"
 export "COCOAPODS_PARALLEL_CODE_SIGN=true"
 export "FLUTTER_BUILD_DIR=build"
-export "FLUTTER_BUILD_NAME=2.0.3"
-export "FLUTTER_BUILD_NUMBER=3"
+export "FLUTTER_BUILD_NAME=2.0.4"
+export "FLUTTER_BUILD_NUMBER=4"
 export "DART_OBFUSCATION=false"
 export "TRACK_WIDGET_CREATION=true"
 export "TREE_SHAKE_ICONS=false"

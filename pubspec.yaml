@@ -1,5 +1,5 @@
-name: my_app
-description: "A new Flutter project."
+name: attendwise
+description: "A digital college attendance management system."
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 version: 2.0.4+4
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  intl: ^0.17.0
+  intl: ^0.18.1 # Updated from ^0.17.0 for compatibility
   syncfusion_flutter_xlsio: ^20.3.47
   path_provider: ^2.1.5
   permission_handler: ^11.1.0
@@ -20,21 +20,52 @@ dependencies:
   shared_preferences: ^2.3.2
   dio: ^5.7.0
   open_file: ^3.2.1
+  flutter_dotenv: ^5.1.0
 
+  # State management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
+
+  # Navigation
+  go_router: ^13.1.0
+
+  # UI components
+  fl_chart: ^0.66.0
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.1
+  flutter_svg: ^2.0.9
+
+  # Firebase - Updated for web compatibility
   pdf: ^3.9.0
   printing: ^5.6.0
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.15.3
-  cloud_firestore: ^4.13.6
-  firebase_storage: ^11.5.6
-  firebase_messaging: ^14.7.9
+  firebase_core: ^2.27.1
+  firebase_auth: ^4.17.9
+  cloud_firestore: ^4.15.9
+  firebase_storage: ^11.6.10
+  firebase_messaging: ^14.7.20
   flutter_local_notifications: ^16.3.2
+
+  # Internet connectivity
+  connectivity_plus: ^5.0.2
+
+  # File picking
+  file_picker: ^6.1.1
+  csv: ^5.1.1
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.13.1
+
+  # Code generation
+  build_runner: ^2.4.8
+  freezed: ^2.4.6
+  json_serializable: ^6.7.1
+  riverpod_generator: ^2.3.9
 
 flutter:
   uses-material-design: true
@@ -43,6 +74,7 @@ flutter:
     - assets/
     - assets/logo.png
     - assets/nothing_serch.png
+    - .env
 
   fonts:
     - family: Audiowide
@@ -53,4 +85,4 @@ flutter_icons:
   android: true
   ios: true
   adaptive_icon_background: "#000000"
-  image_path: "assets/appLogo.png"
+  image_path: "assets/logo.png"

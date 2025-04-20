@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -46,28 +47,28 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDNpEZAsybnA0G9DNuGqO5L8dFXjvGbQs4',
-    appId: '1:995671720434:android:56e4c4a7f59b8f8f4cc511',
-    messagingSenderId: '995671720434',
-    projectId: 'attendwise2',
-    storageBucket: 'attendwise2.appspot.com',
-  );
+  static FirebaseOptions get android => FirebaseOptions(
+        apiKey: dotenv.env['ANDROID_API_KEY'] ?? '',
+        appId: dotenv.env['ANDROID_APP_ID'] ?? '',
+        messagingSenderId: dotenv.env['ANDROID_MESSAGING_SENDER_ID'] ?? '',
+        projectId: dotenv.env['ANDROID_PROJECT_ID'] ?? '',
+        storageBucket: dotenv.env['ANDROID_STORAGE_BUCKET'] ?? '',
+      );
 
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBLbluKp5d08t-VA5lPsQXJNXmGGgRrWYs',
-    appId: '1:995671720434:ios:7eb1b7c88cc5dca34cc511',
-    messagingSenderId: '995671720434',
-    projectId: 'attendwise2',
-    storageBucket: 'attendwise2.appspot.com',
-  );
+  static FirebaseOptions get macos => FirebaseOptions(
+        apiKey: dotenv.env['MACOS_API_KEY'] ?? '',
+        appId: dotenv.env['MACOS_APP_ID'] ?? '',
+        messagingSenderId: dotenv.env['MACOS_MESSAGING_SENDER_ID'] ?? '',
+        projectId: dotenv.env['MACOS_PROJECT_ID'] ?? '',
+        storageBucket: dotenv.env['MACOS_STORAGE_BUCKET'] ?? '',
+      );
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyAVS3aJDBP4cKVLNmIXDSzJf2pv7L7RhXY',
-    appId: '1:995671720434:web:a5e4d2daeca08ad14cc511',
-    messagingSenderId: '995671720434',
-    projectId: 'attendwise2',
-    storageBucket: 'attendwise2.appspot.com',
-    authDomain: 'attendwise2.firebaseapp.com',
-  );
+  static FirebaseOptions get web => FirebaseOptions(
+        apiKey: dotenv.env['WEB_API_KEY'] ?? '',
+        appId: dotenv.env['WEB_APP_ID'] ?? '',
+        messagingSenderId: dotenv.env['WEB_MESSAGING_SENDER_ID'] ?? '',
+        projectId: dotenv.env['WEB_PROJECT_ID'] ?? '',
+        storageBucket: dotenv.env['WEB_STORAGE_BUCKET'] ?? '',
+        authDomain: dotenv.env['WEB_AUTH_DOMAIN'] ?? '',
+      );
 }

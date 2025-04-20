@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyDh9TJaNkRI9SFqwgqnRr6lxytOAIdD7nQ</string>
+	<string>AIzaSyBLbluKp5d08t-VA5lPsQXJNXmGGgRrWYs</string>
 	<key>GCM_SENDER_ID</key>
 	<string>995671720434</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.myApp</string>
+	<string>com.hackerspace.attendwise</string>
 	<key>PROJECT_ID</key>
 	<string>attendwise2</string>
 	<key>STORAGE_BUCKET</key>
-	<string>attendwise2.firebasestorage.app</string>
+	<string>attendwise2.appspot.com</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:995671720434:ios:aee3c570733cf5f36cab6b</string>
+	<string>1:995671720434:ios:7eb1b7c88cc5dca34cc511</string>
 </dict>
 </plist>

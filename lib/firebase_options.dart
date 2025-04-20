@@ -47,28 +47,25 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey:
-        'AIza...', // You'll need to replace this with the actual API key for attendwise2
-    appId: 'com.hackerspace.my_app',
-    messagingSenderId: '000000000000', // Replace with actual sender ID
+    apiKey: 'AIzaSyDNpEZAsybnA0G9DNuGqO5L8dFXjvGbQs4',
+    appId: '1:995671720434:android:56e4c4a7f59b8f8f4cc511',
+    messagingSenderId: '995671720434',
     projectId: 'attendwise2',
     storageBucket: 'attendwise2.appspot.com',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey:
-        'AIza...', // You'll need to replace this with the actual API key for attendwise2
-    appId: 'com.example.myApp',
-    messagingSenderId: '000000000000', // Replace with actual sender ID
+    apiKey: 'AIzaSyBLbluKp5d08t-VA5lPsQXJNXmGGgRrWYs',
+    appId: '1:995671720434:ios:7eb1b7c88cc5dca34cc511',
+    messagingSenderId: '995671720434',
     projectId: 'attendwise2',
     storageBucket: 'attendwise2.appspot.com',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey:
-        'AIza...', // You'll need to replace this with the actual API key for attendwise2
-    appId: 'my_app',
-    messagingSenderId: '000000000000', // Replace with actual sender ID
+    apiKey: 'AIzaSyAVS3aJDBP4cKVLNmIXDSzJf2pv7L7RhXY',
+    appId: '1:995671720434:web:a5e4d2daeca08ad14cc511',
+    messagingSenderId: '995671720434',
     projectId: 'attendwise2',
     storageBucket: 'attendwise2.appspot.com',
     authDomain: 'attendwise2.firebaseapp.com',

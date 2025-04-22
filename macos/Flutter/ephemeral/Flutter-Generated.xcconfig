@@ -2,11 +2,10 @@
 FLUTTER_ROOT=/Users/sayansanpui/development/flutter
 FLUTTER_APPLICATION_PATH=/Volumes/T7/Developer/AttendWise_ A Digital College Attendance Management System/AttendWise2
 COCOAPODS_PARALLEL_CODE_SIGN=true
-FLUTTER_TARGET=/Volumes/T7/Developer/AttendWise_ A Digital College Attendance Management System/AttendWise2/lib/main.dart
 FLUTTER_BUILD_DIR=build
 FLUTTER_BUILD_NAME=2.0.4
 FLUTTER_BUILD_NUMBER=4
 DART_OBFUSCATION=false
 TRACK_WIDGET_CREATION=true
 TREE_SHAKE_ICONS=false
-PACKAGE_CONFIG=/Volumes/T7/Developer/AttendWise_ A Digital College Attendance Management System/AttendWise2/.dart_tool/package_config.json
+PACKAGE_CONFIG=.dart_tool/package_config.json

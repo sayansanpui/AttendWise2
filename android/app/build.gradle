@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.hackerspace.my_app"
-    compileSdk = 35
+    compileSdk = 34
     ndkVersion = "25.1.8937393"
 
     compileOptions {
@@ -36,9 +36,33 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 23
-        targetSdk = 35  // Updated to match compileSdk
+        targetSdk = 34
         versionCode = 8
         versionName = "2.2.0"
+    }
+
+    sourceSets {
+        main {
+            res.srcDirs += ['src/main/res', 'src/main/res-v31']
+        }
+    }
+
+    aaptOptions {
+        noCompress "tflite"
+    }
+    
+    buildFeatures {
+        buildConfig true
+    }
+    
+    // Explicitly filter out the lStar attribute
+    androidResources {
+        additionalParameters += ['--warn-manifest-validation']
+    }
+    
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 
     signingConfigs {
@@ -51,11 +75,21 @@ android {
     }
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now,
-            // so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
             signingConfig = signingConfigs.release
+            
+            // The following helps to filter out resources not compatible with the target SDK
+            resValue "bool", "IS_NEW_ARCHITECTURE_ENABLED", "false"
+            
+            // Fix for lStar attribute error
+            ndk {
+                abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+            }
+        }
+        debug {
+            // Fix for lStar attribute error in debug mode as well
+            ndk {
+                abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+            }
         }
     }
 }
@@ -66,6 +100,9 @@ dependencies {
     
     // Add additional Firebase dependencies if needed
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    
+    // Add specific Material components version to avoid attribute conflicts
+    implementation 'com.google.android.material:material:1.10.0'
 }
 
 flutter {

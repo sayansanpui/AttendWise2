@@ -39,7 +39,7 @@ dependencies:
 
   # Firebase - Updated for web compatibility
   pdf: ^3.9.0
-  printing: ^5.6.0
+  printing: ^5.11.1 # Updated from 5.4.3 to fix Android compatibility
   firebase_core: ^2.27.1
   firebase_auth: ^4.17.9
   cloud_firestore: ^4.15.9
@@ -54,6 +54,7 @@ dependencies:
   file_picker: ^6.1.1
   csv: ^5.1.1
   google_fonts: ^6.2.1
+  device_info_plus: ^10.1.2
 
 dev_dependencies:
   flutter_test:

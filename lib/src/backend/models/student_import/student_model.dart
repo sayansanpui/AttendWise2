@@ -8,8 +8,8 @@ class StudentModel {
 
   // Personal information
   final String displayName; // Full name of student
-  final String email; // College email
-  final String? personalEmail; // Personal email
+  final String email; // College E-mail
+  final String? personalEmail; // Student Email Id
   final String? mobileNumber; // Student's mobile number
 
   // Academic information
@@ -17,9 +17,26 @@ class StudentModel {
   final String? section; // Section (e.g., A, B, C)
   final String? specialization; // Specialization if any (e.g., AIML, DS, IOT)
   final String batch; // Batch/Session (e.g., 2022-2026)
-  final int currentSemester; // Current semester (e.g., 1)
-  final int currentYear; // Current year (e.g., 1)
+  final int? currentSemester; // Current semester (e.g., 1, 2, 3...)
+  final int? currentYear; // Current year (e.g., 1, 2, 3, 4)
+  final String? joiningYear; // Year of joining the institution
+  final String? passOutYear; // Year of passing out from the institution
   final String? stream; // Stream name (e.g., Computer Science & Engineering)
+
+  // Additional academic identifiers
+  final String? universityRollNo; // University Roll Number
+  final String? universityRegistrationNo; // University Registration Number
+  final String? rank; // Rank in the academic records
+  final String? examType; // Type of exam (e.g., Regular, Supplementary)
+  final String? courseStartingYear; // Year the course started
+  final String? courseEndingYear; // Year the course will end
+  final String? courseDuration; // Duration of the course in years
+  final String? courseName; // Name of the course
+  final String?
+      currentSemesterName; // Name of the current semester (e.g., Spring 2025)
+
+  // Institute information
+  final String? instituteName; // Full name of the institute
 
   // Admission details
   final String? entranceExam; // Entrance exam (e.g., WBJEE, JEE-MAIN)
@@ -47,6 +64,7 @@ class StudentModel {
   final Timestamp? dateOfBirth; // Date of birth
   final String? address; // Address
   final String? profileImageUrl; // URL to profile image
+  final String? signatureUrl; // URL to signature image
 
   StudentModel({
     required this.uid,
@@ -55,8 +73,6 @@ class StudentModel {
     required this.email,
     required this.department,
     required this.batch,
-    required this.currentSemester,
-    required this.currentYear,
     required this.accountCreatedAt,
     required this.lastLoginAt,
     required this.isActive,
@@ -66,6 +82,16 @@ class StudentModel {
     this.section,
     this.specialization,
     this.stream,
+    this.universityRollNo,
+    this.universityRegistrationNo,
+    this.rank,
+    this.examType,
+    this.courseStartingYear,
+    this.courseEndingYear,
+    this.courseDuration,
+    this.courseName,
+    this.currentSemesterName,
+    this.instituteName,
     this.entranceExam,
     this.entranceExamRank,
     this.category,
@@ -81,6 +107,11 @@ class StudentModel {
     this.dateOfBirth,
     this.address,
     this.profileImageUrl,
+    this.signatureUrl,
+    this.joiningYear,
+    this.passOutYear,
+    this.currentSemester,
+    this.currentYear,
   });
 
   factory StudentModel.fromJson(Map<String, dynamic> json) {
@@ -91,8 +122,6 @@ class StudentModel {
       email: json['email'] as String,
       department: json['department'] as String,
       batch: json['batch'] as String,
-      currentSemester: json['currentSemester'] as int,
-      currentYear: json['currentYear'] as int,
       accountCreatedAt: json['accountCreatedAt'] as Timestamp,
       lastLoginAt: json['lastLoginAt'] as Timestamp,
       isActive: json['isActive'] as bool,
@@ -102,6 +131,16 @@ class StudentModel {
       section: json['section'] as String?,
       specialization: json['specialization'] as String?,
       stream: json['stream'] as String?,
+      universityRollNo: json['universityRollNo'] as String?,
+      universityRegistrationNo: json['universityRegistrationNo'] as String?,
+      rank: json['rank'] as String?,
+      examType: json['examType'] as String?,
+      courseStartingYear: json['courseStartingYear'] as String?,
+      courseEndingYear: json['courseEndingYear'] as String?,
+      courseDuration: json['courseDuration'] as String?,
+      courseName: json['courseName'] as String?,
+      currentSemesterName: json['currentSemesterName'] as String?,
+      instituteName: json['instituteName'] as String?,
       entranceExam: json['entranceExam'] as String?,
       entranceExamRank: json['entranceExamRank'] as int?,
       category: json['category'] as String?,
@@ -117,6 +156,11 @@ class StudentModel {
       dateOfBirth: json['dateOfBirth'] as Timestamp?,
       address: json['address'] as String?,
       profileImageUrl: json['profileImageUrl'] as String?,
+      signatureUrl: json['signatureUrl'] as String?,
+      joiningYear: json['joiningYear'] as String?,
+      passOutYear: json['passOutYear'] as String?,
+      currentSemester: json['currentSemester'] as int?,
+      currentYear: json['currentYear'] as int?,
     );
   }
 
@@ -128,8 +172,6 @@ class StudentModel {
       'email': email,
       'department': department,
       'batch': batch,
-      'currentSemester': currentSemester,
-      'currentYear': currentYear,
       'accountCreatedAt': accountCreatedAt,
       'lastLoginAt': lastLoginAt,
       'isActive': isActive,
@@ -139,6 +181,16 @@ class StudentModel {
       'section': section,
       'specialization': specialization,
       'stream': stream,
+      'universityRollNo': universityRollNo,
+      'universityRegistrationNo': universityRegistrationNo,
+      'rank': rank,
+      'examType': examType,
+      'courseStartingYear': courseStartingYear,
+      'courseEndingYear': courseEndingYear,
+      'courseDuration': courseDuration,
+      'courseName': courseName,
+      'currentSemesterName': currentSemesterName,
+      'instituteName': instituteName,
       'entranceExam': entranceExam,
       'entranceExamRank': entranceExamRank,
       'category': category,
@@ -154,6 +206,11 @@ class StudentModel {
       'dateOfBirth': dateOfBirth,
       'address': address,
       'profileImageUrl': profileImageUrl,
+      'signatureUrl': signatureUrl,
+      'joiningYear': joiningYear,
+      'passOutYear': passOutYear,
+      'currentSemester': currentSemester,
+      'currentYear': currentYear,
     };
   }
 
@@ -179,11 +236,18 @@ class StudentModel {
   static StudentModel fromUserModel(
     UserModel user, {
     required String batch,
-    required int currentSemester,
-    required int currentYear,
     String? section,
     String? specialization,
     String? personalEmail,
+    String? universityRollNo,
+    String? universityRegistrationNo,
+    String? instituteName,
+    String? courseStartingYear,
+    String? courseEndingYear,
+    String? joiningYear,
+    String? passOutYear,
+    int? currentSemester,
+    int? currentYear,
   }) {
     return StudentModel(
       uid: user.uid,
@@ -192,8 +256,6 @@ class StudentModel {
       email: user.email,
       department: user.department,
       batch: batch,
-      currentSemester: currentSemester,
-      currentYear: currentYear,
       accountCreatedAt: user.createdAt,
       lastLoginAt: user.lastLogin,
       isActive: user.isActive,
@@ -203,6 +265,15 @@ class StudentModel {
       section: section,
       specialization: specialization,
       personalEmail: personalEmail,
+      universityRollNo: universityRollNo,
+      universityRegistrationNo: universityRegistrationNo,
+      instituteName: instituteName,
+      courseStartingYear: courseStartingYear,
+      courseEndingYear: courseEndingYear,
+      joiningYear: joiningYear,
+      passOutYear: passOutYear,
+      currentSemester: currentSemester,
+      currentYear: currentYear,
     );
   }
 
@@ -217,9 +288,19 @@ class StudentModel {
     String? section,
     String? specialization,
     String? batch,
-    int? currentSemester,
-    int? currentYear,
+    String? joiningYear,
+    String? passOutYear,
     String? stream,
+    String? universityRollNo,
+    String? universityRegistrationNo,
+    String? rank,
+    String? examType,
+    String? courseStartingYear,
+    String? courseEndingYear,
+    String? courseDuration,
+    String? courseName,
+    String? currentSemesterName,
+    String? instituteName,
     String? entranceExam,
     int? entranceExamRank,
     String? category,
@@ -239,6 +320,9 @@ class StudentModel {
     Timestamp? dateOfBirth,
     String? address,
     String? profileImageUrl,
+    String? signatureUrl,
+    int? currentSemester,
+    int? currentYear,
   }) {
     return StudentModel(
       uid: uid ?? this.uid,
@@ -251,9 +335,20 @@ class StudentModel {
       section: section ?? this.section,
       specialization: specialization ?? this.specialization,
       batch: batch ?? this.batch,
-      currentSemester: currentSemester ?? this.currentSemester,
-      currentYear: currentYear ?? this.currentYear,
+      joiningYear: joiningYear ?? this.joiningYear,
+      passOutYear: passOutYear ?? this.passOutYear,
       stream: stream ?? this.stream,
+      universityRollNo: universityRollNo ?? this.universityRollNo,
+      universityRegistrationNo:
+          universityRegistrationNo ?? this.universityRegistrationNo,
+      rank: rank ?? this.rank,
+      examType: examType ?? this.examType,
+      courseStartingYear: courseStartingYear ?? this.courseStartingYear,
+      courseEndingYear: courseEndingYear ?? this.courseEndingYear,
+      courseDuration: courseDuration ?? this.courseDuration,
+      courseName: courseName ?? this.courseName,
+      currentSemesterName: currentSemesterName ?? this.currentSemesterName,
+      instituteName: instituteName ?? this.instituteName,
       entranceExam: entranceExam ?? this.entranceExam,
       entranceExamRank: entranceExamRank ?? this.entranceExamRank,
       category: category ?? this.category,
@@ -273,6 +368,9 @@ class StudentModel {
       dateOfBirth: dateOfBirth ?? this.dateOfBirth,
       address: address ?? this.address,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
+      signatureUrl: signatureUrl ?? this.signatureUrl,
+      currentSemester: currentSemester ?? this.currentSemester,
+      currentYear: currentYear ?? this.currentYear,
     );
   }
 }

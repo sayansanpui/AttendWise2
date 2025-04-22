@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:excel/excel.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../models/student_import/index.dart';
 import '../services/firebase_service.dart';
@@ -31,6 +33,158 @@ class StudentImportRepository {
     } catch (e) {
       throw Exception('Error adding student: ${e.toString()}');
     }
+  }
+
+  /// Create a new student
+  Future<String> createNewStudent({
+    required String displayName,
+    required String email,
+    required String department,
+    required String batch,
+    required String defaultPassword,
+    String? personalEmail,
+    String? mobileNumber,
+    String? universityRollNo,
+    String? universityRegistrationNo,
+    String? studentId,
+    String? rank,
+    String? examType,
+    String? category,
+    String? section,
+    String? specialization,
+    String? stream,
+    String? courseStartingYear,
+    String? courseEndingYear,
+    String? courseDuration,
+    String? courseName,
+    String? currentSemesterName,
+    String? instituteName,
+    Timestamp? admissionDate,
+    String? admissionStatus,
+    String? fatherName,
+    String? fatherMobile,
+    String? motherName,
+    String? motherMobile,
+    String? bloodGroup,
+    String? gender,
+    Timestamp? dateOfBirth,
+    String? address,
+    File? profileImage,
+    File? signatureImage,
+  }) async {
+    try {
+      // Create Firebase Auth account
+      final userCredential =
+          await _firebaseService.auth.createUserWithEmailAndPassword(
+        email: email,
+        password: defaultPassword,
+      );
+
+      final uid = userCredential.user!.uid;
+
+      // Generate student ID if not provided
+      final generatedStudentId =
+          studentId ?? _generateStudentId(department, batch);
+
+      // Generate default password if not provided
+      final generatedDefaultPassword =
+          defaultPassword ?? _generateDefaultPassword(generatedStudentId);
+
+      // Upload profile image if provided
+      String? profileImageUrl;
+      if (profileImage != null) {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('student_profiles')
+            .child('$uid.jpg');
+
+        await storageRef.putFile(profileImage);
+        profileImageUrl = await storageRef.getDownloadURL();
+      }
+
+      // Upload signature image if provided
+      String? signatureUrl;
+      if (signatureImage != null) {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('student_signatures')
+            .child('$uid.jpg');
+
+        await storageRef.putFile(signatureImage);
+        signatureUrl = await storageRef.getDownloadURL();
+      }
+
+      // Create the student model
+      final studentModel = StudentModel(
+        uid: uid,
+        studentId: generatedStudentId,
+        displayName: displayName,
+        email: email,
+        department: department,
+        batch: batch,
+        // currentSemester: 1, // Default to first semester
+        // currentYear: 1, // Default to first year
+        accountCreatedAt: Timestamp.now(),
+        lastLoginAt: Timestamp.now(),
+        isActive: true,
+        passwordChanged: false,
+        defaultPassword: defaultPassword,
+        personalEmail: personalEmail,
+        mobileNumber: mobileNumber,
+        universityRollNo: universityRollNo,
+        universityRegistrationNo: universityRegistrationNo,
+        rank: rank,
+        examType: examType,
+        category: category,
+        section: section,
+        specialization: specialization,
+        stream: stream,
+        courseStartingYear: courseStartingYear,
+        courseEndingYear: courseEndingYear,
+        courseDuration: courseDuration,
+        courseName: courseName,
+        currentSemesterName: currentSemesterName,
+        instituteName: instituteName,
+        admissionDate: admissionDate,
+        admissionStatus: admissionStatus,
+        fatherName: fatherName,
+        fatherMobile: fatherMobile,
+        motherName: motherName,
+        motherMobile: motherMobile,
+        bloodGroup: bloodGroup,
+        gender: gender,
+        dateOfBirth: dateOfBirth,
+        address: address,
+        profileImageUrl: profileImageUrl,
+        signatureUrl: signatureUrl,
+      );
+
+      // Save student to Firestore
+      await addStudent(studentModel);
+
+      return uid;
+    } catch (e) {
+      throw Exception('Error creating student: ${e.toString()}');
+    }
+  }
+
+  /// Generate a student ID based on department code and batch
+  String _generateStudentId(String department, String batch) {
+    final now = DateTime.now();
+    final deptCode =
+        department.substring(0, min(3, department.length)).toUpperCase();
+    final yearCode = batch.split('-').first.substring(
+        2, 4); // Extract year code from batch (e.g., "22" from "2022-2026")
+    final randomDigits =
+        (now.millisecondsSinceEpoch % 10000).toString().padLeft(4, '0');
+
+    return '$yearCode$deptCode$randomDigits';
+  }
+
+  /// Generate a default password based on student ID
+  String _generateDefaultPassword(String studentId) {
+    // return 'Attend@${studentId.substring(studentId.length - 4)}';
+    return 'password'; // Placeholder for default password
   }
 
   /// Get a student by ID
@@ -313,8 +467,7 @@ class StudentImportRepository {
           }
 
           // Create Firebase Auth account with default password
-          final defaultPassword =
-              'Attend@${studentId.substring(studentId.length - 4)}';
+          const defaultPassword = 'password';
           final userCredential =
               await _firebaseService.auth.createUserWithEmailAndPassword(
             email: email,
@@ -437,7 +590,8 @@ class StudentImportRepository {
         // Only generate for students without a default password
         if (student.defaultPassword == null) {
           final defaultPassword =
-              'Attend@${student.studentId.substring(student.studentId.length - 4)}';
+              // 'Attend@${student.studentId.substring(student.studentId.length - 4)}';
+              'password'; // Placeholder for default password
 
           // Update student record
           await _firebaseService.studentsCollection

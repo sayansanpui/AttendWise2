@@ -189,7 +189,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             ListTile(
               leading:
                   Icon(Icons.upload_file, color: theme.colorScheme.primary),
-              title: const Text('Import Student Data'),
+              title: const Text('Import Data'),
               onTap: () {
                 Navigator.pop(context);
                 _showImportDataDialog();

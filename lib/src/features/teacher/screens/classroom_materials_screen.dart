@@ -11,6 +11,10 @@ import 'dart:io'; // Added for File class
 import 'dart:typed_data'; // Add for Uint8List
 import 'package:flutter/foundation.dart'
     show kIsWeb; // Add to detect web platform
+import 'package:permission_handler/permission_handler.dart'; // Added for runtime permissions
+import 'package:http/http.dart' as http; // Added for HTTP requests
+import 'package:path_provider/path_provider.dart'; // Added for temporary directory
+import 'package:device_info_plus/device_info_plus.dart'; // Added for device info
 
 import '../../../config/theme/app_theme.dart';
 import '../../../config/theme/dimensions.dart'; // Added for AppDimensions
@@ -19,6 +23,9 @@ import '../../shared/widgets/loading_indicator.dart';
 import '../../shared/utils/date_time_helper.dart';
 import '../../shared/widgets/loading_button.dart'; // Added for LoadingButton
 import '../../shared/widgets/empty_state.dart'; // Added for EmptyState
+// Platform-specific utilities
+import '../../admin/widgets/web_utils.dart'
+    if (dart.library.io) '../../admin/widgets/mobile_utils.dart';
 
 /// Screen for managing classroom materials and assignments
 class ClassroomMaterialsScreen extends ConsumerStatefulWidget {
@@ -122,6 +129,14 @@ class _ClassroomMaterialsScreenState
   }
 
   Future<void> _pickFile() async {
+    // For Android, check permissions first
+    if (!kIsWeb) {
+      bool hasPermission = await _checkPermissions();
+      if (!hasPermission) {
+        return;
+      }
+    }
+
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.any,
@@ -334,6 +349,14 @@ class _ClassroomMaterialsScreenState
   }
 
   Future<void> _uploadStudentDataFromExcel() async {
+    // For Android, check permissions first
+    if (!kIsWeb) {
+      bool hasPermission = await _checkPermissions();
+      if (!hasPermission) {
+        return;
+      }
+    }
+
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -578,6 +601,131 @@ class _ClassroomMaterialsScreenState
     }
 
     return students;
+  }
+
+  Future<bool> _checkPermissions() async {
+    if (kIsWeb) {
+      // Web doesn't need runtime permissions
+      return true;
+    }
+
+    // Check Android version
+    if (Platform.isAndroid) {
+      // Get Android SDK version
+      final deviceInfo = DeviceInfoPlugin();
+      final androidInfo = await deviceInfo.androidInfo;
+      final sdkVersion = androidInfo.version.sdkInt;
+
+      // For Android 13+ (API 33+), request new media permissions
+      // instead of storage permissions
+      if (sdkVersion >= 33) {
+        // Request media permissions for Android 13+
+        Map<Permission, PermissionStatus> statuses = await [
+          Permission.photos,
+          Permission.videos,
+          Permission.audio,
+        ].request();
+
+        // Check if any permission is granted (we only need one for Excel files)
+        if (statuses.values.any((status) => status.isGranted)) {
+          return true;
+        } else {
+          // Show error message if all permissions denied
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Storage permission is required to access files'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return false;
+        }
+      } else {
+        // For Android 12 and below, use storage permission
+        PermissionStatus status = await Permission.storage.status;
+
+        if (status.isGranted) {
+          return true;
+        }
+
+        // Request permission if not granted
+        status = await Permission.storage.request();
+
+        if (status.isGranted) {
+          return true;
+        } else {
+          // Show error message if permission denied
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Storage permission is required to access files'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return false;
+        }
+      }
+    }
+
+    // For iOS and other platforms, return true
+    return true;
+  }
+
+  Future<void> _downloadFile(String fileUrl, String fileName) async {
+    // For Android, check permissions first
+    if (!kIsWeb) {
+      bool hasPermission = await _checkPermissions();
+      if (!hasPermission) {
+        return;
+      }
+    }
+
+    try {
+      if (kIsWeb) {
+        // For web platform, use anchor element for download
+        final anchorElement = createAnchorElement(href: fileUrl);
+        anchorElement.setAttribute('download', fileName);
+        anchorElement.click();
+      } else {
+        // Show downloading indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloading $fileName...')),
+        );
+
+        // Get temp directory for saving file
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/$fileName';
+        final file = File(filePath);
+
+        // Download the file using HTTP
+        final response = await http.get(Uri.parse(fileUrl));
+        await file.writeAsBytes(response.bodyBytes);
+
+        // Open the file
+        await OpenFile.open(filePath);
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Downloaded $fileName successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download file: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _showAddMaterialBottomSheet() {
@@ -1003,14 +1151,7 @@ class _ClassroomMaterialsScreenState
                     ),
                     IconButton(
                       icon: const Icon(Icons.download),
-                      onPressed: () {
-                        // In a real app, implement file download here
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Downloading $fileName...'),
-                          ),
-                        );
-                      },
+                      onPressed: () => _downloadFile(fileUrl, fileName),
                       tooltip: 'Download',
                       iconSize: 20,
                       padding: EdgeInsets.zero,

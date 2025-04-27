@@ -237,7 +237,7 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
       else if (_fieldMappings['personalEmail']!.isEmpty &&
           (lowerHeader == 'personalemail' ||
               lowerHeader == 'personal email' ||
-              lowerHeader == 'student email id')) {
+              lowerHeader == 'Student Email')) {
         _fieldMappings['personalEmail'] = header;
       }
 
@@ -883,47 +883,108 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
 
     print('Prepared ${studentsToImport.length} students for import');
 
-    // Use Firestore batch and Firebase Auth for creating accounts
+    // Use Firestore batch for efficient operations
     final batch = FirebaseFirestore.instance.batch();
     final studentsRef = FirebaseFirestore.instance.collection('students');
     final usersRef = FirebaseFirestore.instance.collection('users');
 
-    int successCount = 0;
+    int newStudentCount = 0;
+    int updatedStudentCount = 0;
     List<String> failedImports = [];
 
-    // Process each student
+    // Check existing students first to determine which to update vs create
     for (var student in studentsToImport) {
       try {
-        // Check if a user with this email already exists
-        bool userExists = false;
-        try {
-          final methods = await FirebaseAuth.instance
-              .fetchSignInMethodsForEmail(student['email']);
-          userExists = methods.isNotEmpty;
-        } catch (e) {
-          print('Error checking existing user: $e');
-          // Continue with account creation attempt
+        final studentId = student['studentId']?.toString().trim();
+        final email = student['email']?.toString().trim();
+
+        if (studentId == null ||
+            studentId.isEmpty ||
+            email == null ||
+            email.isEmpty) {
+          failedImports.add('Missing required studentId or email');
+          continue;
         }
 
-        UserCredential? userCredential;
-        String uid = '';
+        // First try to find student by email
+        QuerySnapshot emailQuery =
+            await studentsRef.where('email', isEqualTo: email).limit(1).get();
 
-        if (userExists) {
-          // If user exists, skip creation but add to failed imports
-          failedImports.add('${student['studentId']} - Email already exists');
-          continue;
+        // If not found by email, try by studentId
+        QuerySnapshot idQuery = emailQuery.docs.isEmpty
+            ? await studentsRef
+                .where('studentId', isEqualTo: studentId)
+                .limit(1)
+                .get()
+            : emailQuery;
+
+        if (idQuery.docs.isNotEmpty) {
+          // STUDENT EXISTS - Update existing student
+          final existingStudentDoc = idQuery.docs.first;
+          final existingUid = existingStudentDoc.id;
+
+          // Keep original UID and creation timestamp
+          student['uid'] = existingUid;
+
+          // Preserve certain fields from the existing record that shouldn't be overwritten
+          final existingData =
+              existingStudentDoc.data() as Map<String, dynamic>;
+          student['accountCreatedAt'] =
+              existingData['accountCreatedAt']; // Keep original creation date
+          student['passwordChanged'] = existingData['passwordChanged'] ??
+              false; // Keep password changed status
+
+          // Don't override the default password if user has already changed it
+          if (existingData['passwordChanged'] == true) {
+            student.remove('defaultPassword');
+          }
+
+          // Update both students and users collections
+          batch.update(studentsRef.doc(existingUid), student);
+
+          // Update only relevant fields in users collection
+          final userUpdateData = {
+            'displayName': student['displayName'],
+            'email': student['email'],
+            'department': student['department'],
+            'universityId': student['studentId'],
+            'isActive': student['isActive'] ?? true,
+            'phoneNumber': student['mobileNumber'] ?? '',
+          };
+
+          batch.update(usersRef.doc(existingUid), userUpdateData);
+          updatedStudentCount++;
         } else {
-          // Try to create user account with retry logic
+          // STUDENT DOESN'T EXIST - Create new student
+          UserCredential? userCredential;
+          String uid = '';
+
+          // Check if a user with this email already exists in Firebase Auth
+          bool userExists = false;
+          try {
+            final methods =
+                await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
+            userExists = methods.isNotEmpty;
+          } catch (e) {
+            print('Error checking existing user: $e');
+          }
+
+          if (userExists) {
+            failedImports.add(
+                '${student['studentId']} - Email exists in Auth but not in database');
+            continue;
+          }
+
+          // Create Firebase Auth account with default password
           int retryCount = 0;
           const maxRetries = 3;
           bool success = false;
 
           while (!success && retryCount < maxRetries) {
             try {
-              // Create Firebase Auth account with default password
               userCredential =
                   await FirebaseAuth.instance.createUserWithEmailAndPassword(
-                email: student['email'],
+                email: email,
                 password: student['defaultPassword'],
               );
               uid = userCredential.user!.uid;
@@ -931,93 +992,87 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
             } catch (authError) {
               retryCount++;
               if (retryCount >= maxRetries) {
-                String errorMessage =
-                    'Failed after $maxRetries attempts: ${authError.toString()}';
-                if (authError is FirebaseAuthException) {
-                  // Provide more specific error messages for common auth errors
-                  switch (authError.code) {
-                    case 'email-already-in-use':
-                      errorMessage = 'Email is already in use';
-                      break;
-                    case 'invalid-email':
-                      errorMessage = 'Email format is invalid';
-                      break;
-                    case 'weak-password':
-                      errorMessage = 'Password is too weak';
-                      break;
-                    case 'operation-not-allowed':
-                      errorMessage = 'Email/password accounts are not enabled';
-                      break;
-                    default:
-                      errorMessage = 'Firebase Auth error: ${authError.code}';
-                  }
-                }
-                throw Exception(errorMessage);
+                throw Exception(
+                    'Auth creation failed: ${authError.toString()}');
               }
-              // Wait before retrying
               await Future.delayed(Duration(milliseconds: 500 * retryCount));
             }
           }
-        }
 
-        // Only proceed if we have a valid UID
-        if (uid.isNotEmpty) {
-          // Get the UID and add it to the student document
-          student['uid'] = uid;
-          student['accountCreatedAt'] = FieldValue.serverTimestamp();
-          student['lastLoginAt'] = FieldValue.serverTimestamp();
+          if (uid.isNotEmpty) {
+            // Set new user data
+            student['uid'] = uid;
+            student['accountCreatedAt'] = FieldValue.serverTimestamp();
+            student['lastLoginAt'] = FieldValue.serverTimestamp();
 
-          // Add to students collection
-          final studentRef = studentsRef.doc(uid);
-          batch.set(studentRef, student);
+            // Add to students collection
+            batch.set(studentsRef.doc(uid), student);
 
-          // Also add to users collection with minimal data for authentication
-          final userDoc = {
-            'uid': uid,
-            'email': student['email'],
-            'displayName': student['displayName'],
-            'role': 'student',
-            'department': student['department'],
-            'universityId': student['studentId'],
-            'createdAt': FieldValue.serverTimestamp(),
-            'lastLogin': FieldValue.serverTimestamp(),
-            'isActive': true,
-            'passwordChanged': false,
-            'profileImageUrl': student['profileImageUrl'] ?? '',
-            'phoneNumber': student['mobileNumber'] ?? '',
-          };
+            // Also add to users collection
+            final userDoc = {
+              'uid': uid,
+              'email': student['email'],
+              'displayName': student['displayName'],
+              'role': 'student',
+              'department': student['department'],
+              'universityId': student['studentId'],
+              'createdAt': FieldValue.serverTimestamp(),
+              'lastLogin': FieldValue.serverTimestamp(),
+              'isActive': true,
+              'passwordChanged': false,
+              'profileImageUrl': student['profileImageUrl'] ?? '',
+              'phoneNumber': student['mobileNumber'] ?? '',
+            };
 
-          batch.set(usersRef.doc(uid), userDoc);
-          successCount++;
+            batch.set(usersRef.doc(uid), userDoc);
+            newStudentCount++;
+          }
         }
       } catch (e) {
         failedImports.add('${student['studentId']} - ${e.toString()}');
       }
     }
 
-    // Commit the batch only if there are successful imports
-    if (successCount > 0) {
+    // Commit the batch if there are successful imports or updates
+    if (newStudentCount > 0 || updatedStudentCount > 0) {
       try {
         await batch.commit();
       } catch (batchError) {
-        // If batch commit fails, add it to the error report
         throw Exception(
-            'Error committing data to Firestore: ${batchError.toString()}. $successCount accounts were created but data was not saved.');
+            'Error committing data to Firestore: ${batchError.toString()}.');
       }
     }
 
-    // Report results
+    // Report results with separate counts for new and updated
+    String resultMessage = '';
+    if (newStudentCount > 0) {
+      resultMessage += '$newStudentCount new students created. ';
+    }
+    if (updatedStudentCount > 0) {
+      resultMessage += '$updatedStudentCount existing students updated. ';
+    }
+
     if (failedImports.isNotEmpty) {
-      if (successCount == 0) {
+      if (newStudentCount == 0 && updatedStudentCount == 0) {
         throw Exception(
             'All imports failed. Errors: ${failedImports.join('; ')}');
       } else {
         throw Exception(
-            '${successCount} students imported successfully. ${failedImports.length} imports failed: ${failedImports.join('; ')}');
+            '$resultMessage ${failedImports.length} imports failed: ${failedImports.join('; ')}');
       }
-    } else if (successCount == 0) {
+    } else if (newStudentCount == 0 && updatedStudentCount == 0) {
       throw Exception(
-          'No students were imported. Check your data and try again.');
+          'No students were imported or updated. Check your data and try again.');
+    }
+
+    // Set a success message that includes both new and updated counts
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(resultMessage),
+          backgroundColor: Colors.green,
+        ),
+      );
     }
 
     return;
@@ -1432,7 +1487,61 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
   // Helper widget to build field mapping dropdowns
   Widget _buildFieldMapping(String fieldName, String displayName) {
     final theme = Theme.of(context);
+    final isSmallScreen = MediaQuery.of(context).size.width < 380;
 
+    // Use vertical layout for very small screens
+    if (isSmallScreen) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(displayName, style: theme.textTheme.bodyMedium),
+          SizedBox(height: 4),
+          DropdownButtonFormField<String>(
+            isExpanded: true, // Ensures the dropdown fits within its container
+            menuMaxHeight: 300, // Limit height of dropdown menu
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              border: OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(AppDimensions.borderRadiusSmall),
+              ),
+            ),
+            value: _fieldMappings[fieldName]!.isEmpty
+                ? null
+                : _fieldMappings[fieldName],
+            hint: const Text('Select column'),
+            items: [
+              const DropdownMenuItem<String>(
+                value: '',
+                child: Text('Not used'),
+              ),
+              ..._headers
+                  .map((header) => DropdownMenuItem<String>(
+                        value: header,
+                        child: Text(
+                          header,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                        ),
+                      ))
+                  .toList(),
+            ],
+            onChanged: (String? value) {
+              setState(() {
+                _fieldMappings[fieldName] = value ?? '';
+              });
+            },
+          ),
+          SizedBox(height: 12), // More spacing between stacked items
+        ],
+      );
+    }
+
+    // Use horizontal layout for larger screens
     return Row(
       children: [
         Expanded(
@@ -1442,6 +1551,8 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
         Expanded(
           flex: 3,
           child: DropdownButtonFormField<String>(
+            isExpanded: true,
+            menuMaxHeight: 300,
             decoration: InputDecoration(
               isDense: true,
               contentPadding: EdgeInsets.symmetric(
@@ -1483,457 +1594,713 @@ class _DataImportDialogState extends ConsumerState<DataImportDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 380;
 
     return Dialog(
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: 600,
           maxHeight: MediaQuery.of(context).size.height *
-              0.8, // Limit max height to 80% of screen
+              0.85, // Increased slightly for better space
         ),
         child: Padding(
-          padding: EdgeInsets.all(AppDimensions.screenPadding),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Import Data',
-                style: theme.textTheme.headlineSmall,
-              ),
-              SizedBox(height: AppDimensions.spacing16),
-              Text(
-                'Import student, teacher, or class data from CSV or Excel files',
-                style: theme.textTheme.bodyMedium,
-              ),
-              SizedBox(height: AppDimensions.spacing24),
+          padding: EdgeInsets.all(
+              isSmallScreen ? 12.0 : AppDimensions.screenPadding),
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Import Data',
+                  style: theme.textTheme.headlineSmall,
+                ),
+                SizedBox(height: isSmallScreen ? 8.0 : AppDimensions.spacing16),
+                Text(
+                  'Import student, teacher, or class data from CSV or Excel files',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                SizedBox(
+                    height: isSmallScreen ? 16.0 : AppDimensions.spacing24),
 
-              // Data type selection
-              Text(
-                'Select data type:',
-                style: theme.textTheme.titleMedium,
-              ),
-              SizedBox(height: AppDimensions.spacing8),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: 'students',
-                    label: Text('Students'),
-                    icon: Icon(Icons.school),
+                // Data type selection - Responsive UI for small screens
+                Text(
+                  'Select data type:',
+                  style: theme.textTheme.titleMedium,
+                ),
+                SizedBox(height: 8),
+                if (isSmallScreen)
+                  // For very small screens, use dropdown instead of segmented button
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(
+                            AppDimensions.borderRadiusSmall),
+                      ),
+                    ),
+                    value: _importType,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'students',
+                        child: Text('Students'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'teachers',
+                        child: Text('Teachers'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'classes',
+                        child: Text('Classes'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _importType = value;
+                          // Reset field mappings when changing import type
+                          _fieldMappings.forEach((key, mappedValue) {
+                            _fieldMappings[key] = '';
+                          });
+                          // Remap fields based on new type
+                          _autoMapFields();
+                        });
+                      }
+                    },
+                  )
+                else
+                  // For larger screens, keep the original segmented button
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'students',
+                        label: Text('Students', style: TextStyle(fontSize: 13)),
+                        icon: Icon(Icons.school),
+                      ),
+                      ButtonSegment(
+                        value: 'teachers',
+                        label: Text('Teachers', style: TextStyle(fontSize: 13)),
+                        icon: Icon(Icons.person),
+                      ),
+                      ButtonSegment(
+                        value: 'classes',
+                        label: Text('Classes', style: TextStyle(fontSize: 13)),
+                        icon: Icon(Icons.class_),
+                      ),
+                    ],
+                    selected: {_importType},
+                    onSelectionChanged: (Set<String> newSelection) {
+                      setState(() {
+                        _importType = newSelection.first;
+                        // Reset field mappings when changing import type
+                        _fieldMappings.forEach((key, value) {
+                          _fieldMappings[key] = '';
+                        });
+                        // Remap fields based on new type
+                        _autoMapFields();
+                      });
+                    },
                   ),
-                  ButtonSegment(
-                    value: 'teachers',
-                    label: Text('Teachers'),
-                    icon: Icon(Icons.person),
-                  ),
-                  ButtonSegment(
-                    value: 'classes',
-                    label: Text('Classes'),
-                    icon: Icon(Icons.class_),
-                  ),
-                ],
-                selected: {_importType},
-                onSelectionChanged: (Set<String> newSelection) {
-                  setState(() {
-                    _importType = newSelection.first;
-                    // Reset field mappings when changing import type
-                    _fieldMappings.forEach((key, value) {
-                      _fieldMappings[key] = '';
-                    });
-                    // Remap fields based on new type
-                    _autoMapFields();
-                  });
-                },
-              ),
-              SizedBox(height: AppDimensions.spacing24),
+                SizedBox(
+                    height: isSmallScreen ? 16.0 : AppDimensions.spacing24),
 
-              // Make the rest of the content scrollable
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // File selection area
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color:
-                                  theme.colorScheme.outline.withOpacity(0.5)),
-                          borderRadius:
-                              BorderRadius.circular(AppDimensions.borderRadius),
-                        ),
-                        child: _selectedFilePath == null &&
-                                _selectedFileBytes == null
-                            ? InkWell(
-                                onTap: _pickFile,
-                                child: Padding(
-                                  padding:
-                                      EdgeInsets.all(AppDimensions.spacing24),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                // Make the rest of the content scrollable
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // File selection area
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color:
+                                    theme.colorScheme.outline.withOpacity(0.5)),
+                            borderRadius: BorderRadius.circular(
+                                AppDimensions.borderRadius),
+                          ),
+                          child: _selectedFilePath == null &&
+                                  _selectedFileBytes == null
+                              ? InkWell(
+                                  onTap: _pickFile,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(isSmallScreen
+                                        ? 16.0
+                                        : AppDimensions.spacing24),
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.upload_file,
+                                          size: isSmallScreen ? 36 : 48,
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                        SizedBox(
+                                            height: isSmallScreen
+                                                ? 12.0
+                                                : AppDimensions.spacing16),
+                                        Text(
+                                          'Click to select a file',
+                                          style: theme.textTheme.titleMedium,
+                                        ),
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'Supported formats: .csv, .xlsx, .xls',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : Padding(
+                                  padding: EdgeInsets.all(isSmallScreen
+                                      ? 12.0
+                                      : AppDimensions.spacing16),
+                                  child: Row(
                                     children: [
                                       Icon(
-                                        Icons.upload_file,
-                                        size: 48,
+                                        _fileName.endsWith('.csv')
+                                            ? Icons.insert_drive_file
+                                            : Icons.table_chart,
                                         color: theme.colorScheme.primary,
                                       ),
-                                      SizedBox(height: AppDimensions.spacing16),
-                                      Text(
-                                        'Click to select a file',
-                                        style: theme.textTheme.titleMedium,
+                                      SizedBox(
+                                          width: isSmallScreen
+                                              ? 8.0
+                                              : AppDimensions.spacing16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              _fileName,
+                                              style:
+                                                  theme.textTheme.titleMedium,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            if (_csvData != null)
+                                              Text(
+                                                '${_csvData!.length - 1} rows found',
+                                                style:
+                                                    theme.textTheme.bodySmall,
+                                              ),
+                                          ],
+                                        ),
                                       ),
-                                      SizedBox(height: AppDimensions.spacing8),
-                                      Text(
-                                        'Supported formats: .csv, .xlsx, .xls',
-                                        style: theme.textTheme.bodySmall,
+                                      IconButton(
+                                        icon: const Icon(Icons.refresh),
+                                        onPressed: _fileName.isEmpty
+                                            ? null
+                                            : _pickFile,
+                                        tooltip: 'Select a different file',
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline),
+                                        onPressed: () {
+                                          setState(() {
+                                            _selectedFilePath = null;
+                                            _selectedFileBytes = null;
+                                            _fileName = '';
+                                            _csvData = null;
+                                            _excelData = null;
+                                            _headers = [];
+                                            _fieldMappings
+                                                .forEach((key, value) {
+                                              _fieldMappings[key] = '';
+                                            });
+                                          });
+                                        },
+                                        tooltip: 'Remove file',
                                       ),
                                     ],
                                   ),
                                 ),
-                              )
-                            : Padding(
-                                padding:
-                                    EdgeInsets.all(AppDimensions.spacing16),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      _fileName.endsWith('.csv')
-                                          ? Icons.insert_drive_file
-                                          : Icons.table_chart,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                    SizedBox(width: AppDimensions.spacing16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _fileName,
-                                            style: theme.textTheme.titleMedium,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          if (_csvData != null)
-                                            Text(
-                                              '${_csvData!.length - 1} rows found',
-                                              style: theme.textTheme.bodySmall,
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.refresh),
-                                      onPressed:
-                                          _fileName.isEmpty ? null : _pickFile,
-                                      tooltip: 'Select a different file',
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline),
-                                      onPressed: () {
-                                        setState(() {
-                                          _selectedFilePath = null;
-                                          _selectedFileBytes = null;
-                                          _fileName = '';
-                                          _csvData = null;
-                                          _excelData = null;
-                                          _headers = [];
-                                          _fieldMappings.forEach((key, value) {
-                                            _fieldMappings[key] = '';
-                                          });
-                                        });
-                                      },
-                                      tooltip: 'Remove file',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                      ),
-
-                      SizedBox(height: AppDimensions.spacing16),
-
-                      // Field mapping section - show only when file is selected and data type is students
-                      if (_headers.isNotEmpty && _importType == 'students') ...[
-                        ExpansionPanelList(
-                          expansionCallback: (int index, bool isExpanded) {
-                            setState(() {
-                              _isFieldMappingExpanded =
-                                  !_isFieldMappingExpanded;
-                            });
-                          },
-                          children: [
-                            ExpansionPanel(
-                              isExpanded: _isFieldMappingExpanded,
-                              headerBuilder:
-                                  (BuildContext context, bool isExpanded) {
-                                return ListTile(
-                                  title: Text(
-                                    'Map Fields:',
-                                    style: theme.textTheme.titleMedium,
-                                  ),
-                                );
-                              },
-                              body: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                      color: theme.colorScheme.outline
-                                          .withOpacity(0.2)),
-                                  borderRadius: BorderRadius.circular(
-                                      AppDimensions.borderRadius),
-                                ),
-                                padding:
-                                    EdgeInsets.all(AppDimensions.spacing16),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          flex: 2,
-                                          child: Text(
-                                            'Field',
-                                            style: theme.textTheme.titleSmall,
-                                          ),
-                                        ),
-                                        Expanded(
-                                          flex: 3,
-                                          child: Text(
-                                            'Column in File',
-                                            style: theme.textTheme.titleSmall,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    SizedBox(height: AppDimensions.spacing12),
-                                    _buildFieldMapping(
-                                        'studentId', 'Student ID*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('name', 'Name*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'email', 'College E-mail*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'personalEmail', 'Student Email Id'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'mobileNumber', 'Mobile'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('section', 'Section'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('stream', 'Stream'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'department', 'Department*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'specialization', 'Specialization'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('batch', 'Batch*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'joiningYear', 'Joining Year*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'joiningSemester', 'Joining Semester'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'passOutYear', 'Pass Out Year*'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'bloodGroup', 'Blood Group'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('rank', 'Rank'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('examType', 'Exam Type'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('category', 'Category'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'fatherName', 'Father Name'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'fatherMobile', 'Father Mobile'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'motherName', 'Mother Name'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'motherMobile', 'Mother Mobile'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'admissionDate', 'Admission Date'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('universityRollNo',
-                                        'University Roll No'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping(
-                                        'universityRegistrationNo',
-                                        'University Registration No'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('lastQualification',
-                                        'Last Qualification'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('lastQualificationYear',
-                                        'Last Qualification Passout Year'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('aadharNo', 'Aadhar No'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    _buildFieldMapping('dob', 'Date of Birth'),
-                                    SizedBox(height: AppDimensions.spacing8),
-                                    Text(
-                                      '* Required fields',
-                                      style:
-                                          theme.textTheme.bodySmall?.copyWith(
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
-                      ],
 
-                      // Preview section
-                      if (_csvData != null && _csvData!.isNotEmpty) ...[
-                        SizedBox(height: AppDimensions.spacing16),
-                        ExpansionPanelList(
-                          expansionCallback: (int index, bool isExpanded) {
-                            setState(() {
-                              _isPreviewExpanded = !_isPreviewExpanded;
-                            });
-                          },
-                          children: [
-                            ExpansionPanel(
-                              isExpanded: _isPreviewExpanded,
-                              headerBuilder:
-                                  (BuildContext context, bool isExpanded) {
-                                return ListTile(
-                                  title: Text(
-                                    'Preview:',
-                                    style: theme.textTheme.titleMedium,
+                        SizedBox(
+                            height:
+                                isSmallScreen ? 12.0 : AppDimensions.spacing16),
+
+                        // Field mapping section - show only when file is selected and data type is students
+                        if (_headers.isNotEmpty &&
+                            _importType == 'students') ...[
+                          ExpansionPanelList(
+                            expansionCallback: (int index, bool isExpanded) {
+                              setState(() {
+                                _isFieldMappingExpanded =
+                                    !_isFieldMappingExpanded;
+                              });
+                            },
+                            children: [
+                              ExpansionPanel(
+                                isExpanded: _isFieldMappingExpanded,
+                                headerBuilder:
+                                    (BuildContext context, bool isExpanded) {
+                                  return ListTile(
+                                    title: Text(
+                                      'Map Fields:',
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal:
+                                            isSmallScreen ? 12.0 : 16.0),
+                                  );
+                                },
+                                body: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                        color: theme.colorScheme.outline
+                                            .withOpacity(0.2)),
+                                    borderRadius: BorderRadius.circular(
+                                        AppDimensions.borderRadius),
                                   ),
-                                );
-                              },
-                              body: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                      color: theme.colorScheme.outline
-                                          .withOpacity(0.2)),
-                                  borderRadius: BorderRadius.circular(
-                                      AppDimensions.borderRadius),
-                                ),
-                                // Set a reasonable maximum height but allow content to be smaller
-                                constraints: BoxConstraints(maxHeight: 200),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.vertical,
-                                  child: SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    child: DataTable(
-                                      columns: _csvData![0]
-                                          .map((header) => DataColumn(
-                                                label: Text(
-                                                  header.toString(),
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
+                                  padding: EdgeInsets.all(isSmallScreen
+                                      ? 12.0
+                                      : AppDimensions.spacing16),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (!isSmallScreen)
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              flex: 2,
+                                              child: Text(
+                                                'Field',
+                                                style:
+                                                    theme.textTheme.titleSmall,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              flex: 3,
+                                              child: Text(
+                                                'Column in File',
+                                                style:
+                                                    theme.textTheme.titleSmall,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      if (!isSmallScreen)
+                                        SizedBox(
+                                            height: AppDimensions.spacing12),
+
+                                      // Required fields first
+                                      _buildFieldMapping(
+                                          'studentId', 'Student ID*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping('name', 'Name*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping(
+                                          'email', 'College E-mail*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping(
+                                          'department', 'Department*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping('batch', 'Batch*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping(
+                                          'joiningYear', 'Joining Year*'),
+                                      SizedBox(height: 5),
+                                      _buildFieldMapping(
+                                          'passOutYear', 'Pass Out Year*'),
+                                      SizedBox(height: 5),
+
+                                      // Show a divider between required and optional fields
+                                      Divider(height: 24),
+
+                                      // For small screens, limit visible optional fields and add "Show More" button
+                                      if (isSmallScreen) ...[
+                                        _buildFieldMapping(
+                                            'personalEmail', 'Student Email'),
+                                        _buildFieldMapping(
+                                            'mobileNumber', 'Mobile'),
+                                        _buildFieldMapping(
+                                            'section', 'Section'),
+                                        TextButton(
+                                          onPressed: () {
+                                            showDialog(
+                                              context: context,
+                                              builder: (context) => AlertDialog(
+                                                title:
+                                                    Text('Additional Fields'),
+                                                content: SingleChildScrollView(
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      _buildFieldMapping(
+                                                          'stream', 'Stream'),
+                                                      _buildFieldMapping(
+                                                          'specialization',
+                                                          'Specialization'),
+                                                      _buildFieldMapping(
+                                                          'joiningSemester',
+                                                          'Joining Semester'),
+                                                      _buildFieldMapping(
+                                                          'bloodGroup',
+                                                          'Blood Group'),
+                                                      _buildFieldMapping(
+                                                          'rank', 'Rank'),
+                                                      _buildFieldMapping(
+                                                          'examType',
+                                                          'Exam Type'),
+                                                      _buildFieldMapping(
+                                                          'category',
+                                                          'Category'),
+                                                      _buildFieldMapping(
+                                                          'fatherName',
+                                                          'Father Name'),
+                                                      _buildFieldMapping(
+                                                          'fatherMobile',
+                                                          'Father Mobile'),
+                                                      _buildFieldMapping(
+                                                          'motherName',
+                                                          'Mother Name'),
+                                                      _buildFieldMapping(
+                                                          'motherMobile',
+                                                          'Mother Mobile'),
+                                                      _buildFieldMapping(
+                                                          'admissionDate',
+                                                          'Admission Date'),
+                                                      _buildFieldMapping(
+                                                          'universityRollNo',
+                                                          'University Roll No'),
+                                                      _buildFieldMapping(
+                                                          'universityRegistrationNo',
+                                                          'University Registration No'),
+                                                      _buildFieldMapping(
+                                                          'lastQualification',
+                                                          'Last Qualification'),
+                                                      _buildFieldMapping(
+                                                          'lastQualificationYear',
+                                                          'Last Qualification Passout Year'),
+                                                      _buildFieldMapping(
+                                                          'aadharNo',
+                                                          'Aadhar No'),
+                                                      _buildFieldMapping('dob',
+                                                          'Date of Birth'),
+                                                    ],
+                                                  ),
                                                 ),
-                                              ))
-                                          .toList(),
-                                      rows: _csvData!
-                                          .skip(1)
-                                          .take(5)
-                                          .map(
-                                            (row) => DataRow(
-                                              cells: row
-                                                  .map((cell) => DataCell(
-                                                      Text(cell.toString())))
-                                                  .toList(),
-                                            ),
-                                          )
-                                          .toList(),
-                                    ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(context)
+                                                            .pop(),
+                                                    child: Text('Close'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                          child: Text('Show More Fields'),
+                                        ),
+                                      ] else ...[
+                                        // For larger screens, show all fields
+                                        _buildFieldMapping(
+                                            'personalEmail', 'Student Email'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'mobileNumber', 'Mobile'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'section', 'Section'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping('stream', 'Stream'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'specialization', 'Specialization'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping('joiningSemester',
+                                            'Joining Semester'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'bloodGroup', 'Blood Group'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping('rank', 'Rank'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'examType', 'Exam Type'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'category', 'Category'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'fatherName', 'Father Name'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'fatherMobile', 'Father Mobile'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'motherName', 'Mother Name'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'motherMobile', 'Mother Mobile'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'admissionDate', 'Admission Date'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping('universityRollNo',
+                                            'University Roll No'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'universityRegistrationNo',
+                                            'University Registration No'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping('lastQualification',
+                                            'Last Qualification'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'lastQualificationYear',
+                                            'Last Qualification Passout Year'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'aadharNo', 'Aadhar No'),
+                                        SizedBox(height: 5),
+                                        _buildFieldMapping(
+                                            'dob', 'Date of Birth'),
+                                      ],
+                                      SizedBox(height: 8),
+                                      Text(
+                                        '* Required fields',
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        if (_csvData!.length > 6)
-                          Padding(
-                            padding:
-                                EdgeInsets.only(top: AppDimensions.spacing8),
-                            child: Text(
-                              'Showing 5 of ${_csvData!.length - 1} rows',
-                              style: theme.textTheme.bodySmall,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                      ],
-
-                      SizedBox(height: AppDimensions.spacing24),
-
-                      // Template download option
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.download_outlined,
-                            size: 16,
-                            color: theme.colorScheme.primary,
-                          ),
-                          SizedBox(width: AppDimensions.spacing8),
-                          Text(
-                            'Need a template?',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          TextButton(
-                            onPressed: _isLoading ? null : _downloadTemplate,
-                            child: const Text('Download template'),
+                            ],
                           ),
                         ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
 
-              SizedBox(height: AppDimensions.spacing24),
-
-              // Action buttons always visible at the bottom
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed:
-                        _isLoading ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  SizedBox(width: AppDimensions.spacing16),
-                  FilledButton(
-                    onPressed: _isLoading ? null : _importData,
-                    child: _isLoading
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
+                        // Preview section - revised to be more mobile-friendly
+                        if (_csvData != null && _csvData!.isNotEmpty) ...[
+                          SizedBox(
+                              height: isSmallScreen
+                                  ? 12.0
+                                  : AppDimensions.spacing16),
+                          ExpansionPanelList(
+                            expansionCallback: (int index, bool isExpanded) {
+                              setState(() {
+                                _isPreviewExpanded = !_isPreviewExpanded;
+                              });
+                            },
                             children: [
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: theme.colorScheme.onPrimary,
+                              ExpansionPanel(
+                                isExpanded: _isPreviewExpanded,
+                                headerBuilder:
+                                    (BuildContext context, bool isExpanded) {
+                                  return ListTile(
+                                    title: Text(
+                                      'Preview:',
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal:
+                                            isSmallScreen ? 12.0 : 16.0),
+                                  );
+                                },
+                                body: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                        color: theme.colorScheme.outline
+                                            .withOpacity(0.2)),
+                                    borderRadius: BorderRadius.circular(
+                                        AppDimensions.borderRadius),
+                                  ),
+                                  // Set a reasonable maximum height but allow content to be smaller
+                                  constraints: BoxConstraints(maxHeight: 200),
+                                  child: isSmallScreen
+                                      ? _buildMobilePreviewTable()
+                                      : _buildDesktopPreviewTable(),
                                 ),
                               ),
-                              SizedBox(width: AppDimensions.spacing8),
-                              const Text('Importing...'),
                             ],
-                          )
-                        : const Text('Import Data'),
+                          ),
+                          if (_csvData!.length > 6)
+                            Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text(
+                                'Showing 5 of ${_csvData!.length - 1} rows',
+                                style: theme.textTheme.bodySmall,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                        ],
+
+                        SizedBox(
+                            height:
+                                isSmallScreen ? 16.0 : AppDimensions.spacing24),
+
+                        // Template download option
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.download_outlined,
+                              size: 16,
+                              color: theme.colorScheme.primary,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Need a template?',
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                            TextButton(
+                              onPressed: _isLoading ? null : _downloadTemplate,
+                              child: const Text('Download template'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ],
+                ),
+
+                SizedBox(
+                    height: isSmallScreen ? 16.0 : AppDimensions.spacing24),
+
+                // Action buttons always visible at the bottom
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed:
+                          _isLoading ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    SizedBox(width: AppDimensions.spacing16),
+                    FilledButton(
+                      onPressed: _isLoading ? null : _importData,
+                      child: _isLoading
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: theme.colorScheme.onPrimary,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                const Text('Importing...'),
+                              ],
+                            )
+                          : const Text('Import Data'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // Mobile-optimized preview table with limited columns
+  Widget _buildMobilePreviewTable() {
+    if (_csvData == null || _csvData!.isEmpty) {
+      return const Center(child: Text('No data to preview'));
+    }
+
+    // For mobile, limit the number of columns to show
+    final headers = _csvData![0];
+    final maxColumns = 3; // Show only first 3 columns on mobile
+    final actualColumns =
+        headers.length > maxColumns ? maxColumns : headers.length;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.vertical,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 20,
+          headingTextStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+          dataTextStyle: const TextStyle(fontSize: 12),
+          columns: [
+            for (int i = 0; i < actualColumns; i++)
+              DataColumn(
+                label: Text(
+                  headers[i].toString(),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            if (headers.length > maxColumns)
+              const DataColumn(label: Text('...')),
+          ],
+          rows: _csvData!
+              .skip(1)
+              .take(5)
+              .map(
+                (row) => DataRow(
+                  cells: [
+                    for (int i = 0; i < actualColumns; i++)
+                      DataCell(
+                        i < row.length
+                            ? Text(
+                                row[i].toString(),
+                                overflow: TextOverflow.ellipsis,
+                              )
+                            : const Text(''),
+                      ),
+                    if (headers.length > maxColumns)
+                      const DataCell(Text('...')),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  // Desktop preview table with full columns
+  Widget _buildDesktopPreviewTable() {
+    if (_csvData == null || _csvData!.isEmpty) {
+      return const Center(child: Text('No data to preview'));
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.vertical,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: _csvData![0]
+              .map((header) => DataColumn(
+                    label: Text(
+                      header.toString(),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ))
+              .toList(),
+          rows: _csvData!
+              .skip(1)
+              .take(5)
+              .map(
+                (row) => DataRow(
+                  cells: row
+                      .map((cell) => DataCell(Text(cell.toString())))
+                      .toList(),
+                ),
+              )
+              .toList(),
         ),
       ),
     );
